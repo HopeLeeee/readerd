@@ -1,0 +1,18 @@
+node_modules/
+release/
+test-results/
+.research/
+*.log
+
+# Local ReaderD data and credentials must never be committed.
+ai-key.bin
+settings.json
+reading-profile.md
+*.readerd-original.pdf
+*.readerd-annotations.json
+*.readerd-state.json
+
+# Environment files may contain model keys.
+.env
+.env.*
+!.env.example

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; font-src 'self' data:; connect-src 'self'"
+    />
+    <title>ReaderD</title>
+    <link rel="stylesheet" href="node_modules/pdfjs-dist/web/pdf_viewer.css" />
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <div id="drag-strip" aria-hidden="true"></div>
+    <aside id="outline-panel" class="rail left">
+      <div class="rail-label">CONTENTS <span>章节</span></div>
+      <nav id="outline"><p class="quiet">打开文献后显示章节</p></nav>
+    </aside>
+    <main id="reader" class="is-empty" tabindex="0">
+      <div id="welcome">
+        <div class="eyebrow">A LITTLE SPACE FOR DEEP READING</div>
+        <h1>Reader<span>D</span></h1>
+        <p>让注意力，留在论文里。</p>
+        <div class="welcome-rule"></div>
+        <p class="hint"><kbd>Ctrl</kbd> + <kbd>O</kbd> 打开 PDF</p>
+        <p class="subtle">
+          <kbd>?</kbd> 快捷键 · <kbd>Ctrl</kbd> + <kbd>,</kbd> 阅读偏好
+        </p>
+      </div>
+      <div id="pages"></div>
+    </main>
+    <aside id="recommend-panel" class="rail right">
+      <div class="rail-label">READ NEXT <span>沿引用继续</span></div>
+      <div id="recommendations">
+        <p class="quiet">读完后，遇见下一篇。</p>
+        <p class="subtle">
+          按 Ctrl + Enter 标记已读<br />从本文参考文献中推荐三篇
+        </p>
+      </div>
+    </aside>
+    <div id="toast" role="status" hidden></div>
+    <div id="citation-card" class="float-card" hidden></div>
+    <section id="note-card" aria-label="文字批注" hidden>
+      <div class="note-card-label">批注</div>
+      <div id="note-card-content"></div>
+      <p class="subtle">双击圆点编辑</p>
+    </section>
+    <dialog id="help">
+      <h2>把操作交给快捷键</h2>
+      <div id="shortcut-list"></div>
+      <p id="help-hint" class="subtle">Esc 关闭 · 窗口顶部空白区域可拖动</p>
+    </dialog>
+    <dialog id="note-dialog">
+      <form method="dialog">
+        <h2>写在阅读旁边</h2>
+        <textarea id="note-text" rows="7" placeholder="添加批注…"></textarea>
+        <p class="subtle">Ctrl + Enter 保存 · Esc 取消</p>
+      </form>
+    </dialog>
+    <dialog id="settings-dialog">
+      <h2 id="settings-title">阅读偏好</h2>
+      <p id="setup-intro" class="subtle" hidden>
+        首次使用，请连接 API 服务或本地 Codex。Ctrl + Enter 测试连接并完成设置。
+      </p>
+      <div class="settings-grid">
+        <label
+          >身份<input id="profile-identity" placeholder="例如：研究生" /></label
+        ><label
+          >研究方向<input
+            id="profile-direction"
+            placeholder="例如：微生物代谢、NAD+" /></label
+        ><label class="wide"
+          >兴趣关键词<input
+            id="profile-interests"
+            placeholder="用逗号分隔" /></label
+        ><label class="wide"
+          >AI 连接方式<select id="ai-provider">
+            <option value="api">API 服务（兼容 Chat Completions）</option>
+            <option value="codex">本地 Codex</option>
+          </select></label
+        ><label class="wide api-field"
+          >AI 接口地址<input
+            id="ai-endpoint"
+            placeholder="https://…/v1" /></label
+        ><label class="api-field">模型<input id="ai-model" /></label
+        ><label class="api-field"
+          >API Key<input
+            id="ai-key"
+            type="password"
+            autocomplete="off"
+            placeholder="留空保留已有密钥" /></label
+        ><label class="wide codex-field" hidden
+          >Codex 程序路径（可留空自动查找）<input
+            id="codex-path"
+            placeholder="C:\…\codex.exe"
+        /></label>
+        <p class="wide subtle codex-field" hidden>
+          需先安装 Codex CLI
+          并完成登录。使用已有登录状态，仍需联网并消耗账户额度；不会读取当前聊天。
+        </p>
+        <label
+          >上侧键（熟词）<select id="upper-button">
+            <option value="4">按钮 4</option>
+            <option value="3">按钮 3</option>
+          </select></label
+        ><label
+          >下侧键（生词）<select id="lower-button">
+            <option value="3">按钮 3</option>
+            <option value="4">按钮 4</option>
+          </select></label
+        >
+      </div>
+      <p id="ai-status" role="status" aria-live="polite"></p>
+      <p id="profile-location" class="subtle"></p>
+      <p class="subtle">
+        AI 用于章节识别与悬停词释。调用时发送章节候选或目标词所在句子。<br />Ctrl
+        + Enter 测试连接并保存 · <span id="settings-cancel-hint">Esc 取消</span>
+      </p>
+    </dialog>
+    <dialog id="search-dialog">
+      <input
+        id="search-text"
+        placeholder="搜索正文，Enter 查找下一处"
+        aria-label="搜索正文"
+      />
+      <p id="search-status" class="subtle"></p>
+    </dialog>
+    <script type="module" src="src/app.mjs"></script>
+  </body>
+</html>

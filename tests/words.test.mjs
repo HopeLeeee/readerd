@@ -887,28 +887,34 @@ function dictionaryHover(options = {}) {
   const hit = requestPage("enzyme").hits[0];
   const cards = [];
   companion.hitAt = () => hit;
-  companion.renderGlossCard = (_, message) => cards.push(message);
+  const markers = [];
+  companion.renderGlossCard = (_, message, dictionary = false) => {
+    cards.push(message);
+    markers.push(dictionary);
+  };
   const enter = () =>
     companion.handlePointer({ buttons: 0, target: { closest: () => null } });
-  return { companion, hit, cards, enter };
+  return { companion, hit, cards, markers, enter };
 }
 
-test("cold hover displays a labeled dictionary entry synchronously then replaces it with context", async () => {
+test("cold hover marks dictionary meanings with a dot and removes it after context correction", async () => {
   let resolveAI;
-  const { companion, hit, cards, enter } = dictionaryHover({
+  const { companion, hit, cards, markers, enter } = dictionaryHover({
     requestGloss: () =>
       new Promise((resolve) => {
         resolveAI = resolve;
       }),
   });
   enter();
-  assert.deepEqual(cards, ["词典参考：n. 酶；酵素；催化剂"]);
+  assert.deepEqual(cards, ["n. 酶；酵素；催化剂"]);
+  assert.equal(markers[0], true);
   assert.equal(companion.timer, undefined);
   assert.equal(companion.cache.size, 0);
   await settleRequests();
   resolveAI({ gloss: "酶" });
   await settleRequests();
-  assert.equal(cards.at(-1), "上下文：酶");
+  assert.equal(cards.at(-1), "酶");
+  assert.equal(markers.at(-1), false);
   assert.deepEqual(companion.cache.get(companion.glossKey(hit.candidate)), {
     gloss: "酶",
     source: "ai",
@@ -916,7 +922,7 @@ test("cold hover displays a labeled dictionary entry synchronously then replaces
   // The display source label must never become part of the persisted AI gloss.
   companion.closeGloss();
   enter();
-  assert.equal(cards.at(-1), "上下文：酶");
+  assert.equal(cards.at(-1), "酶");
   companion.destroy();
 });
 
@@ -930,8 +936,8 @@ test("failed or malformed AI keeps dictionary meanings visible without caching t
     const { companion, cards, enter } = dictionaryHover({ requestGloss });
     enter();
     await settleRequests();
-    assert.equal(cards.at(-1), "词典参考：n. 酶；酵素；催化剂");
-    assert.ok(cards.every((message) => message.startsWith("词典参考：")));
+    assert.equal(cards.at(-1), "n. 酶；酵素；催化剂");
+    assert.ok(cards.every((message) => message === "n. 酶；酵素；催化剂"));
     assert.equal(companion.cache.size, 0);
     assert.equal(companion.cacheRevision, 0);
     companion.destroy();
@@ -951,7 +957,7 @@ test("leaving a dictionary hover prevents late context display while retaining v
   companion.closeGloss();
   resolveAI({ gloss: "酶" });
   await settleRequests();
-  assert.deepEqual(cards, ["词典参考：n. 酶；酵素；催化剂"]);
+  assert.deepEqual(cards, ["n. 酶；酵素；催化剂"]);
   assert.equal(
     companion.cache.get(companion.glossKey(hit.candidate)).gloss,
     "酶",
@@ -975,10 +981,10 @@ test("dictionary hover joins a pending prefetch and never replaces local meaning
     }),
   );
   enter();
-  assert.equal(cards[0], "词典参考：n. 酶；酵素；催化剂");
+  assert.equal(cards[0], "n. 酶；酵素；催化剂");
   resolveBatch({ gloss: "酶", source: "prefetch" });
   await settleRequests();
-  assert.equal(cards.at(-1), "上下文：酶");
+  assert.equal(cards.at(-1), "酶");
   assert.equal(calls, 0);
   companion.destroy();
 });
@@ -991,7 +997,7 @@ test("dictionary entries retain multiple meanings, have a bounded length and req
   });
   enter();
   await settleRequests();
-  assert.equal(cards.at(-1), `词典参考：${value.slice(0, 200)}`);
+  assert.equal(cards.at(-1), `${value.slice(0, 200)}`);
   assert.equal(hit.localFallback.length, 200);
   assert.equal(companion.cache.size, 0);
   companion.destroy();
@@ -1017,6 +1023,6 @@ test("a dictionary loaded after an earlier miss can serve the same hit immediate
   companion.closeGloss();
   loaded = true;
   enter();
-  assert.equal(cards[0], "词典参考：酶");
+  assert.equal(cards[0], "酶");
   companion.destroy();
 });

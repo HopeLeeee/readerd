@@ -405,6 +405,16 @@ dialog textarea {
   font-size: 12px;
   pointer-events: none;
 }
+[data-readerd-word-owned="gloss"][data-dictionary="true"]::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #c75450;
+  vertical-align: 2px;
+}
 .word-marker {
   pointer-events: none;
   position: absolute;

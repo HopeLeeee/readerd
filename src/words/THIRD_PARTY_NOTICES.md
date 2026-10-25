@@ -39,7 +39,7 @@ Zotero remains a separate application; its source code is not bundled.
 
 `data/definitions.json` contains genuine Chinese `translation` fields from the
 same pinned upstream revision; no model-generated definitions are included.
-It is used for immediate, explicitly labelled dictionary fallback while a
+It is used for immediate dictionary fallback, marked with a small red dot, while a
 context-specific model translation is pending.
 
 - Source: https://raw.githubusercontent.com/skywind3000/ECDICT/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/ecdict.csv

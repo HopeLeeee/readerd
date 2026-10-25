@@ -95,7 +95,7 @@ try {
       const card = document.querySelector('[data-readerd-word-owned="gloss"]');
       if (
         window.dictionaryDelay === null &&
-        card?.textContent.startsWith("词典参考：")
+        card?.dataset.dictionary === "true"
       )
         window.dictionaryDelay = performance.now() - window.pointerTime;
     });
@@ -111,7 +111,7 @@ try {
   await page.waitForFunction(() =>
     document
       .querySelector('[data-readerd-word-owned="gloss"]')
-      ?.textContent.startsWith("词典参考："),
+      ?.dataset.dictionary === "true",
   );
   const first = await page.evaluate(() => ({
     text: document.querySelector('[data-readerd-word-owned="gloss"]')
@@ -119,20 +119,28 @@ try {
     ms: window.dictionaryDelay,
   }));
   assert.match(first.text, /代谢/);
+  assert.doesNotMatch(first.text, /词典参考|上下文：/);
+  const dot = await page.locator('[data-readerd-word-owned="gloss"]').evaluate(el => {
+    const style = getComputedStyle(el, "::before");
+    return { color: style.backgroundColor, width: style.width };
+  });
+  assert.equal(dot.color, "rgb(199, 84, 80)");
+  assert.equal(dot.width, "5px");
   assert.ok(first.ms < 50, `Dictionary fallback took ${first.ms}ms`);
   await page.screenshot({ path: path.join(run, "dictionary-first.png") });
   release();
   await page.waitForFunction(
     () =>
       document.querySelector('[data-readerd-word-owned="gloss"]')
-        ?.textContent === "上下文：代谢作用",
+        ?.textContent === "代谢作用",
   );
+  assert.equal(await page.locator('[data-readerd-word-owned="gloss"]').getAttribute("data-dictionary"), "false");
   await page.screenshot({ path: path.join(run, "context-corrected.png") });
   const result = {
     status: "passed",
     coldNoAICache: true,
     dictionaryFirst: first,
-    contextCorrection: "上下文：代谢作用",
+    contextCorrection: "代谢作用",
     requests,
     run,
   };

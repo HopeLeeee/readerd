@@ -756,16 +756,18 @@ export class WordCompanion {
     return true;
   }
 
-  renderGlossCard(hit, message) {
+  renderGlossCard(hit, message, dictionary = false) {
     if (this.disposed || this.hover !== hit) return;
     if (this.card) {
       this.card.textContent = message;
+      this.card.dataset.dictionary = String(dictionary);
       return;
     }
     const rect = hit.range.getBoundingClientRect();
     const doc = hit.page.container.ownerDocument;
     const card = doc.createElement("div");
     card.dataset.readerdWordOwned = "gloss";
+    card.dataset.dictionary = String(dictionary);
     card.setAttribute("role", "tooltip");
     card.textContent = message;
     const win = doc.defaultView;
@@ -785,7 +787,7 @@ export class WordCompanion {
     const key = this.glossKey(hit.candidate);
     let result = this.cache.get(key);
     const fallback = this.dictionaryFallback(hit);
-    if (!result && fallback) this.renderGlossCard(hit, `词典参考：${fallback}`);
+    if (!result && fallback) this.renderGlossCard(hit, fallback, true);
     else if (!result && this.aiEnabled())
       this.renderGlossCard(hit, "释义加载中…");
     try {
@@ -824,13 +826,12 @@ export class WordCompanion {
       if (this.disposed || this.hover !== hit || this.sequence !== sequence)
         return;
       const message =
-        (result?.gloss &&
-          (fallback ? `上下文：${result.gloss}` : result.gloss)) ||
-        (fallback && `词典参考：${fallback}`) ||
+        result?.gloss ||
+        fallback ||
         (this.aiEnabled()
           ? "暂未获取到释义，稍后再试"
           : "配置模型后可显示上下文释义");
-      this.renderGlossCard(hit, message);
+      this.renderGlossCard(hit, message, !result?.gloss && !!fallback);
       this.onChange({
         type: "gloss",
         word: hit.candidate.lemma,
@@ -845,7 +846,8 @@ export class WordCompanion {
       ) {
         this.renderGlossCard(
           hit,
-          fallback ? `词典参考：${fallback}` : "释义暂不可用",
+          fallback || "释义暂不可用",
+          !!fallback,
         );
         this.onChange({
           type: "error",

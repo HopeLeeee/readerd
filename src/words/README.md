@@ -65,4 +65,4 @@ Ready context-cache entries render synchronously on pointer hover. The host prov
 
 ## Dictionary-first hover (0.2.5)
 
-The host loads pinned ECDICT translations through `dictionary.mjs` and provides `getDictionaryGloss(candidate)`. Dictionary hits display synchronously with a dictionary-source label and may contain multiple senses. They never enter the contextual AI cache. The same hover continues its AI request and replaces the card with a context-source label only if the pointer remains there. AI failure keeps the dictionary result. See THIRD_PARTY_NOTICES.md for provenance and generator checksums.
+The host loads pinned ECDICT translations through `dictionary.mjs` and provides `getDictionaryGloss(candidate)`. Dictionary hits display synchronously with a small red dot and may contain multiple senses. They never enter the contextual AI cache. The same hover continues its AI request and replaces the card with contextual text, removing the dot, only if the pointer remains there. Neither source adds a text label. AI failure keeps the dictionary result and dot. See THIRD_PARTY_NOTICES.md for provenance and generator checksums.

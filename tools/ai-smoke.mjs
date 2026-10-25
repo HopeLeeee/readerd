@@ -172,7 +172,7 @@ try {
   await page.mouse.move(wordPoint.x, wordPoint.y);
   await page.waitForFunction(
     () =>
-      /^(?:上下文：)?代谢$/.test(
+      /^代谢$/.test(
         document.querySelector('[data-readerd-word-owned="gloss"]')
           ?.textContent || "",
       ),

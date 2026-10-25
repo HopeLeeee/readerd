@@ -4,11 +4,16 @@ import { PDFDocument } from "pdf-lib";
 import fs from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
+import os from "node:os";
+import { execFileSync } from "node:child_process";
 const root = path.resolve("test-results"),
   run = path.join(root, `run-${Date.now()}`);
 await fs.mkdir(run, { recursive: true });
 await fs.mkdir(path.join(run, "profile"), { recursive: true });
-await fs.writeFile(path.join(run, "profile", "settings.json"), JSON.stringify({ onboardingComplete: true }));
+await fs.writeFile(
+  path.join(run, "profile", "settings.json"),
+  JSON.stringify({ onboardingComplete: true }),
+);
 const file = path.join(run, "reading-specimen.pdf");
 await createFixture(file);
 const app = await electron.launch({
@@ -29,6 +34,41 @@ try {
     }
   });
   await page.waitForFunction(() => !!window.readerdApp, { timeout: 30000 });
+  let nativeMaterial = null;
+  const acrylic =
+    process.platform === "win32" && Number(os.release().split(".")[2]) >= 22621;
+  if (acrylic) {
+    const handle = await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]
+        .getNativeWindowHandle()
+        .readBigUInt64LE()
+        .toString(),
+    );
+    nativeMaterial = JSON.parse(
+      execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-Command",
+          `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ReaderDBackdrop { [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size); [DllImport("user32.dll")] public static extern int GetWindowRgn(IntPtr hwnd, IntPtr region); [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int left,int top,int right,int bottom); [DllImport("gdi32.dll")] public static extern bool PtInRegion(IntPtr region,int x,int y); [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj); }'; $hwnd=[IntPtr]::new([long]${handle}); $material=0; $result=[ReaderDBackdrop]::DwmGetWindowAttribute($hwnd,38,[ref]$material,4); $region=[ReaderDBackdrop]::CreateRectRgn(0,0,0,0); $regionType=[ReaderDBackdrop]::GetWindowRgn($hwnd,$region); $corner=[ReaderDBackdrop]::PtInRegion($region,0,0); $interior=[ReaderDBackdrop]::PtInRegion($region,100,100); [void][ReaderDBackdrop]::DeleteObject($region); @{ result=$result; material=$material; regionType=$regionType; corner=$corner; interior=$interior } | ConvertTo-Json -Compress`,
+        ],
+        { encoding: "utf8", windowsHide: true },
+      ),
+    );
+    assert.equal(nativeMaterial.result, 0);
+    assert.equal(nativeMaterial.regionType, 3);
+    assert.equal(
+      nativeMaterial.corner,
+      false,
+      "Native glass must be clipped out of the corner",
+    );
+    assert.equal(nativeMaterial.interior, true);
+    assert.equal(
+      nativeMaterial.material,
+      3,
+      "Windows must actually use the Acrylic backdrop",
+    );
+  }
   const initialBounds = await app.evaluate(({ BrowserWindow, screen }) => ({
     bounds: BrowserWindow.getAllWindows()[0].getBounds(),
     area: screen.getPrimaryDisplay().workArea,
@@ -62,7 +102,7 @@ try {
       scroll: reader.scrollHeight,
     };
   });
-  assert.equal(home.background, "rgb(241, 242, 238)");
+  assert.equal(home.background, "rgba(241, 242, 238, 0.52)");
   assert.equal(home.height, home.viewport);
   assert.equal(home.scroll, home.height);
   for (const height of [home.left, home.right])
@@ -145,10 +185,22 @@ try {
     pageTop: document.querySelector(".page").getBoundingClientRect().top,
     outlineWidth: document.getElementById("outline-panel").clientWidth,
   }));
-  for (const key of ["root", "body"])
-    assert.equal(transparency[key], "rgba(0, 0, 0, 0)");
+  assert.equal(transparency.root, "rgba(0, 0, 0, 0)");
+  assert.equal(transparency.body, "rgba(0, 0, 0, 0)");
+  const base = await page.locator("#app-backdrop").evaluate((el) => ({
+    color: getComputedStyle(el).backgroundColor,
+    radius: getComputedStyle(el).borderRadius,
+    z: getComputedStyle(el).zIndex,
+    pointer: getComputedStyle(el).pointerEvents,
+  }));
+  assert.deepEqual(base, {
+    color: "rgba(241, 242, 238, 0.44)",
+    radius: "20px",
+    z: "-1",
+    pointer: "none",
+  });
   for (const key of ["left", "right"])
-    assert.equal(transparency[key], "rgb(241, 242, 238)");
+    assert.equal(transparency[key], "rgba(241, 242, 238, 0.72)");
   assert.equal(transparency.blur, "none");
   assert.equal(transparency.pageTop, 0);
   assert.ok(transparency.outlineWidth >= 300);
@@ -296,14 +348,14 @@ try {
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].getBackgroundColor(),
     ),
-    "#000000",
+    acrylic ? "#000000" : "#f1f2ee",
   );
   assert.equal(
     await app.evaluate(
       async ({ BrowserWindow }) =>
         (await BrowserWindow.getAllWindows()[0].capturePage()).toBitmap()[3],
     ),
-    0,
+    acrylic ? 0 : 255,
   );
   const cite = await page.evaluate(() => {
     const span = [
@@ -636,6 +688,7 @@ try {
     JSON.stringify(
       {
         status: "passed",
+        nativeMaterial,
         pages: 3,
         references: 4,
         recommendations: 3,

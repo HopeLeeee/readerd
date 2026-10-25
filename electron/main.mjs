@@ -11,6 +11,7 @@ import {
 } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   atomicWrite,
@@ -27,6 +28,7 @@ import { requestCodex } from "./codex-bridge.mjs";
 import { preparePortableDataDir } from "./portable-data.mjs";
 import ReaderCCore from "../src/words/readerc-core.js";
 import { pdfPathsFromArguments } from "./launch-files.mjs";
+import { roundedWindowShape } from "./window-shape.mjs";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 if (process.env.READERD_USER_DATA) {
@@ -463,6 +465,9 @@ if (ownsInstance)
     const initialHeight = Math.round(
       workArea.height - (workArea.height - previousHeight) / 3,
     );
+    const acrylic =
+      process.platform === "win32" &&
+      Number(os.release().split(".")[2]) >= 22621;
     window = new BrowserWindow({
       width: 1440,
       height: initialHeight,
@@ -470,8 +475,10 @@ if (ownsInstance)
       minWidth: 860,
       minHeight: 600,
       frame: false,
-      transparent: true,
-      backgroundColor: "#00000000",
+      roundedCorners: true,
+      transparent: acrylic,
+      backgroundMaterial: acrylic ? "acrylic" : "none",
+      backgroundColor: acrylic ? "#00000000" : "#f1f2ee",
       show: false,
       webPreferences: {
         preload: path.join(directory, "preload.cjs"),
@@ -481,6 +488,12 @@ if (ownsInstance)
         webSecurity: true,
       },
     });
+    if (process.platform === "win32") {
+      const roundWindow = () =>
+        window.setShape(roundedWindowShape(...window.getSize()));
+      roundWindow();
+      window.on("resize", roundWindow);
+    }
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("did-start-loading", () => {
       rendererReady = false;

@@ -1,6 +1,6 @@
 {
   "name": "readerd",
-  "version": "0.2.8",
+  "version": "0.2.10",
   "private": true,
   "type": "module",
   "description": "A quiet PDF reading companion for ReaderC",
@@ -50,7 +50,7 @@
     "appId": "io.hopeleeee.readerd",
     "productName": "ReaderD",
     "directories": {
-      "output": "release/0.2.8"
+      "output": "release/0.2.10"
     },
     "files": [
       "electron/**/*",

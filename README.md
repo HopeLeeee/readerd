@@ -1,12 +1,12 @@
 # ReaderD
 
-配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.3 开发预览版**。
+配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.4 开发预览版**。
 
 ## 启动
 
-普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.3.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
+普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.4.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
 
-开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.3/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
+开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.4/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
 
 在 Zotero 的 PDF 打开程序中选择上述新版 `ReaderD.exe`。支持通过命令行传入 PDF 路径，启动后直接打开对应文件（包含中文、空格的路径也支持）。ReaderD 已运行时，会在现有窗口打开新文件并先保存当前批注，不会另外停留在首页。升级后需要在 Zotero 重新选择新版 EXE 路径。
 
@@ -17,6 +17,32 @@
 ## 首次启动
 
 首次启动会先展示快捷键一览，按 Ctrl + Enter 进入 AI 连接设置。必须成功测试 API 服务或本地 Codex 后才能完成引导；引导期间 Esc 不会关闭窗口。命令行传入的 PDF 会等引导完成后再打开。完成一次后，以后启动直接进入阅读界面，可用 Ctrl + 逗号重新修改。
+
+## 绿色版数据
+
+0.2.4 起，打包版默认把配置放在 **EXE 同目录的 `ReaderD-data` 文件夹**，不再写入 `%APPDATA%`：
+
+```text
+ReaderD-0.2.4.exe
+ReaderD-data\
+  settings.json
+  ai-key.bin
+  reading-profile.md
+  gloss-cache.json
+  Local State
+  Cache\ 等运行缓存
+```
+
+- 第一次运行 0.2.4 时，如果 `ReaderD-data` 还没有配置，会从旧的 `%APPDATA%\readerd` 迁移 `settings.json`、`ai-key.bin`、`reading-profile.md`、`gloss-cache.json` 和 `Local State`，不会覆盖 `ReaderD-data` 中已有文件。
+- 移动软件时，把 EXE 和 `ReaderD-data` 文件夹一起移动即可保留设置、词表和缓存。
+- 删除 `ReaderD-data` 相当于清空本软件的配置、阅读画像、词表和词释缓存。
+- 如果 EXE 所在目录不可写（例如放在 `C:\Program Files`），会自动回退到 `%APPDATA%\readerd`。
+- `ai-key.bin` 由 Windows `safeStorage` 加密，与当前 Windows 用户绑定；换电脑或换用户后需要重新填写 API Key。
+- `gloss-cache.json` 含目标词、原句片段和中文释义，只保存在本机。
+- 每篇 PDF 的 `.readerd-original.pdf`、`.readerd-state.json`、`.readerd-annotations.json` 仍放在 PDF 旁边，不进入 `ReaderD-data`。
+- 仍可用 `READERD_USER_DATA` 环境变量指定其他数据目录，优先级高于绿色目录。
+
+源码开发模式（`npm start`）继续使用 Electron 默认的 `%APPDATA%\readerd`，不影响已安装的绿色版数据。
 
 源码开发：安装 Node.js 后在此目录执行：
 
@@ -128,11 +154,14 @@ npm run smoke:codex-cancel
 npm run pack
 npm run dist
 npm run smoke:portable
+npm run smoke:portable-green
 ```
 
 逻辑与文件测试涵盖引用列表与双栏提取、兴趣排序、Markdown 手动内容保护、鼠标侧键、真实词形、批注重复保存和旋转裁剪坐标。桌面测试使用隔离的用户目录和生成的三页论文 PDF，验证无按钮界面、选区、高亮、中文批注写入、引用全量悬浮、侧键状态、三条推荐、偏好保存、重新打开与退出。
 
 首次启动测试使用临时用户目录和本地模拟 API，验证快捷键引导、连接失败不完成引导、API Key 加密保存、引导完成后才打开命令行 PDF，以及重启不重复引导。测试路径包含中文和空格。本地 Codex 的桌面测试使用编译出的临时模拟 `codex.exe`，验证只显示 Codex 字段、错误路径被拒绝、提示词经 stdin 传入、只读参数以及完成后打开 PDF。真实 Codex 仍需有效登录、额度和可访问 `chatgpt.com` 的网络。
+
+绿色版测试把便携 EXE 复制到临时目录，不设置 `READERD_USER_DATA`，验证 `ReaderD-data` 创建在 EXE 旁边、`settings.json` 与 `reading-profile.md` 写入该目录、`APPDATA` 不被使用，并且 `Ctrl + Q` 正常退出。
 
 AI 接口测试使用本地模拟服务验证目录来源约束、后台批量预取、悬停命中缓存、无虚线词不触发释义和中文词释，不代表已验证真实模型识别质量。构建后的 Windows 可执行程序也通过桌面测试。
 

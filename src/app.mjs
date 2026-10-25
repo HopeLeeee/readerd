@@ -114,7 +114,9 @@ function make(tag, className, text) {
   return el;
 }
 function dialog(id) {
-  $(id).showModal();
+  if (id === "search-dialog") {
+    if (!$(id).open) $(id).show();
+  } else $(id).showModal();
 }
 function shapeProfile(result) {
   return parseProfile(
@@ -194,7 +196,7 @@ async function init() {
   });
   await companion.initialize();
   bindPdfPan($("reader"), {
-    isEnabled: () => !!state.pdf && !document.querySelector("dialog[open]"),
+    isEnabled: () => !!state.pdf && !document.querySelector("dialog:modal"),
     onPanStart: () => {
       closeNoteCard();
       companion?.closeGloss();
@@ -208,7 +210,7 @@ async function init() {
     externalOpenQueue = externalOpenQueue
       .catch(() => {})
       .then(async () => {
-        const active = document.querySelector("dialog[open]");
+        const active = document.querySelector("dialog:modal");
         if (active)
           await new Promise((resolve) =>
             active.addEventListener("close", resolve, { once: true }),
@@ -1145,8 +1147,28 @@ function searchNext() {
 document.addEventListener("keydown", (event) => {
   const mod = event.ctrlKey || event.metaKey,
     key = event.key.toLowerCase(),
-    active = document.querySelector("dialog[open]");
+    search = $("search-dialog"),
+    active =
+      document.querySelector("dialog:modal") ||
+      (search.open &&
+      (search.contains(event.target) ||
+        event.key === "Escape" ||
+        (mod && key === "f"))
+        ? search
+        : null);
   if (active) {
+    if (active === search && event.key === "Escape") {
+      event.preventDefault();
+      search.close();
+      $("reader").focus({ preventScroll: true });
+      return;
+    }
+    if (active === search && mod && key === "f") {
+      event.preventDefault();
+      $("search-text").focus();
+      $("search-text").select();
+      return;
+    }
     if (mod && key === "q") {
       event.preventDefault();
       closeApplication().catch(error);
@@ -1311,7 +1333,7 @@ document.addEventListener(
     event.preventDefault();
     if (
       !state.pdf ||
-      document.querySelector("dialog[open]") ||
+      document.querySelector("dialog:modal") ||
       !$("reader").contains(event.target) ||
       !event.deltaY
     )

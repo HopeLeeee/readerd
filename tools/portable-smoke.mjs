@@ -37,7 +37,7 @@ const child = spawn(
     env: { ...process.env, READERD_USER_DATA: profile },
   },
 );
-let browser, page;
+let browser, page, exited = false;
 try {
   let available = false;
   for (let i = 0; i < 120; i++) {
@@ -80,9 +80,21 @@ try {
   await page.screenshot({
     path: path.join(run, "portable-first-launch-passed.png"),
   });
-  await page
-    .evaluate(() => window.readerd.windowAction("close"))
-    .catch(() => {});
+  const exitedPromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Portable app did not exit after Ctrl+Q")),
+      15000,
+    );
+    child.once("exit", () => {
+      clearTimeout(timer);
+      exited = true;
+      resolve();
+    });
+  });
+  await page.keyboard.press("Control+q").catch((error) => {
+    if (!error.message.includes("closed")) throw error;
+  });
+  await exitedPromise;
   console.log(
     JSON.stringify(
       {
@@ -90,6 +102,7 @@ try {
         actualSingleFilePortable: true,
         firstLaunchShortcuts: true,
         apiSetupCompleted: true,
+        closedWithCtrlQ: true,
         exe,
         run,
       },
@@ -103,7 +116,7 @@ try {
       .evaluate(() => window.readerd?.windowAction("close"))
       .catch(() => {});
   if (browser) await browser.close().catch(() => {});
-  child.kill();
+  if (!exited) child.kill();
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 }

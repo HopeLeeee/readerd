@@ -1,6 +1,6 @@
 {
   "name": "readerd",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "A quiet PDF reading companion for ReaderC",
@@ -46,7 +46,7 @@
     "appId": "io.hopeleeee.readerd",
     "productName": "ReaderD",
     "directories": {
-      "output": "release/0.2.2"
+      "output": "release/0.2.3"
     },
     "files": [
       "electron/**/*",
@@ -57,7 +57,8 @@
     ],
     "win": {
       "target": "portable",
-      "signAndEditExecutable": false
+      "icon": "build/icon.ico",
+      "signExecutable": false
     },
     "portable": {
       "artifactName": "ReaderD-${version}.exe"

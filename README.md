@@ -1,14 +1,20 @@
 # ReaderD
 
-配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.2 开发预览版**。
+配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.3 开发预览版**。
 
 ## 启动
 
-普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.2.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
+普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.3.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
 
-开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.2/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
+开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.3/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
 
 在 Zotero 的 PDF 打开程序中选择上述新版 `ReaderD.exe`。支持通过命令行传入 PDF 路径，启动后直接打开对应文件（包含中文、空格的路径也支持）。ReaderD 已运行时，会在现有窗口打开新文件并先保存当前批注，不会另外停留在首页。升级后需要在 Zotero 重新选择新版 EXE 路径。
+
+## Windows 提示与签名
+
+便携版没有商业代码签名证书，Windows SmartScreen 首次运行时可能显示“未知发布者”或“Windows 已保护你的电脑”。这是未签名程序的通用提示，不等于检测到病毒；源代码和构建脚本都在本仓库。可选择“更多信息 → 仍要运行”，并用 Release 中的 SHA-256 核对下载文件。要彻底消除该提示，需要为 EXE 购买并配置 Authenticode 代码签名证书。
+
+## 首次启动
 
 首次启动会先展示快捷键一览，按 Ctrl + Enter 进入 AI 连接设置。必须成功测试 API 服务或本地 Codex 后才能完成引导；引导期间 Esc 不会关闭窗口。命令行传入的 PDF 会等引导完成后再打开。完成一次后，以后启动直接进入阅读界面，可用 Ctrl + 逗号重新修改。
 

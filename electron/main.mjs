@@ -11,7 +11,7 @@ import {
 } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   atomicWrite,
   readJson,
@@ -123,16 +123,12 @@ if (ownsInstance) {
 } else app.quit();
 
 async function registerHandlers() {
-  const expectedUrl = pathToFileURL(
-    path.join(directory, "..", "index.html"),
-  ).href;
+  // The only WebContents in this app is the reader window. Navigation and new
+  // windows are blocked below, so sender identity is the correct boundary; a
+  // path/URL comparison breaks when the portable build extracts to a temp dir.
   const handle = (channel, callback) =>
     ipcMain.handle(channel, (event, ...args) => {
-      if (
-        event.sender !== window?.webContents ||
-        event.senderFrame !== window.webContents.mainFrame ||
-        event.senderFrame.url.split("#")[0] !== expectedUrl
-      )
+      if (event.sender !== window?.webContents)
         throw new Error("拒绝来自非阅读器页面的请求。");
       return callback(event, ...args);
     });

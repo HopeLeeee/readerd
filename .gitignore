@@ -17,3 +17,6 @@ reading-profile.md
 .env.*
 !.env.example
 gloss-cache.json
+
+# Internal audit notes stay local.
+PROJECT_AUDIT_*.md

@@ -141,3 +141,23 @@ test("migration ignores an unwritable location and reports no copied files", asy
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("installed copies keep data outside the installation directory", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "readerd-installed-"));
+  try {
+    await fs.writeFile(path.join(root, "readerd-installed"), "installed");
+    const result = preparePortableDataDir({
+      environment: {},
+      isPackaged: true,
+      execPath: path.join(root, "ReaderD.exe"),
+      appDataDir: root,
+    });
+    assert.equal(result, null);
+    assert.equal(
+      await fs.stat(path.join(root, "ReaderD-data")).catch(() => null),
+      null,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

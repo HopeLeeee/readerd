@@ -4,6 +4,7 @@ import {
   filterOutline,
   recommendReferences,
 } from "./analysis/index.js";
+import { loadDictionary, dictionaryGloss } from "./words/dictionary.mjs";
 import { WordCompanion, loadLexicon } from "./words/companion.js";
 import { parseProfile, updateProfile } from "./profile.mjs";
 import { bindCitationHover } from "./citations.mjs";
@@ -45,6 +46,7 @@ const state = {
   savedRevision: 0,
 };
 let lexicon,
+  dictionary,
   companion,
   observer,
   toastTimer,
@@ -141,12 +143,14 @@ async function init() {
   firstRun = !state.settings.onboardingComplete;
   profileData = await api.getProfile();
   state.profile = shapeProfile(profileData);
-  try {
-    lexicon = await loadLexicon();
-  } catch (e) {
-    toast("词库加载失败，手动标词仍可使用：" + e.message);
-  }
+  const resources = await Promise.allSettled([loadLexicon(), loadDictionary()]);
+  if (resources[0].status === "fulfilled") lexicon = resources[0].value;
+  else toast("词库加载失败，手动标词仍可使用：" + resources[0].reason.message);
+  if (resources[1].status === "fulfilled") dictionary = resources[1].value;
+  else
+    toast("本地词典加载失败，仍可使用 AI 释义：" + resources[1].reason.message);
   companion = new WordCompanion({
+    getDictionaryGloss: (candidate) => dictionaryGloss(candidate, dictionary),
     loadGlossCache: () => api.getGlossCache(),
     saveGlossCache: (entries) => api.saveGlossCache(entries),
     getSettings: () => ({

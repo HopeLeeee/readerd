@@ -877,3 +877,146 @@ test("prefetch prioritizes current viewport upper text and covers all page targe
   assert.ok(batches.every((words) => words.length <= 12));
   companion.destroy();
 });
+
+function dictionaryHover(options = {}) {
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex", hoverDelay: 120 }),
+    getDictionaryGloss: () => "n. 酶；酵素；催化剂",
+    ...options,
+  });
+  const hit = requestPage("enzyme").hits[0];
+  const cards = [];
+  companion.hitAt = () => hit;
+  companion.renderGlossCard = (_, message) => cards.push(message);
+  const enter = () =>
+    companion.handlePointer({ buttons: 0, target: { closest: () => null } });
+  return { companion, hit, cards, enter };
+}
+
+test("cold hover displays a labeled dictionary entry synchronously then replaces it with context", async () => {
+  let resolveAI;
+  const { companion, hit, cards, enter } = dictionaryHover({
+    requestGloss: () =>
+      new Promise((resolve) => {
+        resolveAI = resolve;
+      }),
+  });
+  enter();
+  assert.deepEqual(cards, ["词典参考：n. 酶；酵素；催化剂"]);
+  assert.equal(companion.timer, undefined);
+  assert.equal(companion.cache.size, 0);
+  await settleRequests();
+  resolveAI({ gloss: "酶" });
+  await settleRequests();
+  assert.equal(cards.at(-1), "上下文：酶");
+  assert.deepEqual(companion.cache.get(companion.glossKey(hit.candidate)), {
+    gloss: "酶",
+    source: "ai",
+  });
+  // The display source label must never become part of the persisted AI gloss.
+  companion.closeGloss();
+  enter();
+  assert.equal(cards.at(-1), "上下文：酶");
+  companion.destroy();
+});
+
+test("failed or malformed AI keeps dictionary meanings visible without caching them", async () => {
+  for (const requestGloss of [
+    async () => {
+      throw new Error("offline");
+    },
+    async () => ({ gloss: '{"gloss":"酶' }),
+  ]) {
+    const { companion, cards, enter } = dictionaryHover({ requestGloss });
+    enter();
+    await settleRequests();
+    assert.equal(cards.at(-1), "词典参考：n. 酶；酵素；催化剂");
+    assert.ok(cards.every((message) => message.startsWith("词典参考：")));
+    assert.equal(companion.cache.size, 0);
+    assert.equal(companion.cacheRevision, 0);
+    companion.destroy();
+  }
+});
+
+test("leaving a dictionary hover prevents late context display while retaining valid AI cache", async () => {
+  let resolveAI;
+  const { companion, hit, cards, enter } = dictionaryHover({
+    requestGloss: () =>
+      new Promise((resolve) => {
+        resolveAI = resolve;
+      }),
+  });
+  enter();
+  await settleRequests();
+  companion.closeGloss();
+  resolveAI({ gloss: "酶" });
+  await settleRequests();
+  assert.deepEqual(cards, ["词典参考：n. 酶；酵素；催化剂"]);
+  assert.equal(
+    companion.cache.get(companion.glossKey(hit.candidate)).gloss,
+    "酶",
+  );
+  companion.destroy();
+});
+
+test("dictionary hover joins a pending prefetch and never replaces local meanings with loading", async () => {
+  let resolveBatch;
+  let calls = 0;
+  const { companion, hit, cards, enter } = dictionaryHover({
+    requestGloss: async () => {
+      calls++;
+      return { gloss: "不应请求" };
+    },
+  });
+  companion.pending.set(
+    companion.glossKey(hit.candidate),
+    new Promise((resolve) => {
+      resolveBatch = resolve;
+    }),
+  );
+  enter();
+  assert.equal(cards[0], "词典参考：n. 酶；酵素；催化剂");
+  resolveBatch({ gloss: "酶", source: "prefetch" });
+  await settleRequests();
+  assert.equal(cards.at(-1), "上下文：酶");
+  assert.equal(calls, 0);
+  companion.destroy();
+});
+
+test("dictionary entries retain multiple meanings, have a bounded length and require no AI setup", async () => {
+  const value = "n. 酶；酵素；催化剂；".repeat(30);
+  const { companion, hit, cards, enter } = dictionaryHover({
+    getSettings: () => ({}),
+    getDictionaryGloss: () => value,
+  });
+  enter();
+  await settleRequests();
+  assert.equal(cards.at(-1), `词典参考：${value.slice(0, 200)}`);
+  assert.equal(hit.localFallback.length, 200);
+  assert.equal(companion.cache.size, 0);
+  companion.destroy();
+});
+
+test("dictionary misses retain the normal cold hover delay", () => {
+  const { companion, cards, enter } = dictionaryHover({
+    getDictionaryGloss: () => null,
+  });
+  enter();
+  assert.deepEqual(cards, []);
+  assert.ok(companion.timer);
+  companion.destroy();
+});
+
+test("a dictionary loaded after an earlier miss can serve the same hit immediately", () => {
+  let loaded = false;
+  const { companion, cards, enter } = dictionaryHover({
+    getDictionaryGloss: () => (loaded ? "酶" : null),
+  });
+  enter();
+  assert.deepEqual(cards, []);
+  companion.closeGloss();
+  loaded = true;
+  enter();
+  assert.equal(cards[0], "词典参考：酶");
+  companion.destroy();
+});

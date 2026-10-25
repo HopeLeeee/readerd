@@ -112,6 +112,7 @@ export function sideButtonStatus(button, settings = {}) {
 export class WordCompanion {
   constructor({
     getSettings = () => ({}),
+    getDictionaryGloss = () => null,
     requestGloss,
     requestGlossBatch,
     onChange = () => {},
@@ -122,6 +123,7 @@ export class WordCompanion {
   } = {}) {
     Object.assign(this, {
       getSettings,
+      getDictionaryGloss,
       requestGloss,
       requestGlossBatch,
       onChange,
@@ -199,6 +201,22 @@ export class WordCompanion {
     return core.saneGloss(result?.gloss)
       ? { ...result, gloss: result.gloss.trim() }
       : null;
+  }
+
+  dictionaryFallback(hit) {
+    if (hit.localFallback) return hit.localFallback;
+    // Dictionary entries can legitimately contain several meanings. Keep them
+    // separate from the stricter, single-context AI gloss validation and cache.
+    try {
+      const value = this.getDictionaryGloss(hit.candidate);
+      hit.localFallback =
+        typeof value === "string"
+          ? value.replace(/\s+/g, " ").trim().slice(0, 200) || null
+          : null;
+    } catch {
+      hit.localFallback = null;
+    }
+    return hit.localFallback;
   }
 
   pageSignal(page) {
@@ -705,7 +723,10 @@ export class WordCompanion {
       this.vocabulary[hit.candidate.lemma]?.state === "known"
     )
       return;
-    if (this.cache.has(this.glossKey(hit.candidate))) {
+    if (
+      this.cache.has(this.glossKey(hit.candidate)) ||
+      this.dictionaryFallback(hit)
+    ) {
       this.showGloss(hit);
       return;
     }
@@ -763,7 +784,10 @@ export class WordCompanion {
     const signal = this.pageSignal(hit.page);
     const key = this.glossKey(hit.candidate);
     let result = this.cache.get(key);
-    if (!result && this.aiEnabled()) this.renderGlossCard(hit, "释义加载中…");
+    const fallback = this.dictionaryFallback(hit);
+    if (!result && fallback) this.renderGlossCard(hit, `词典参考：${fallback}`);
+    else if (!result && this.aiEnabled())
+      this.renderGlossCard(hit, "释义加载中…");
     try {
       // A hover can join an in-flight background batch instead of starting a
       // second request for the same word and sentence.
@@ -800,7 +824,9 @@ export class WordCompanion {
       if (this.disposed || this.hover !== hit || this.sequence !== sequence)
         return;
       const message =
-        result?.gloss ||
+        (result?.gloss &&
+          (fallback ? `上下文：${result.gloss}` : result.gloss)) ||
+        (fallback && `词典参考：${fallback}`) ||
         (this.aiEnabled()
           ? "暂未获取到释义，稍后再试"
           : "配置模型后可显示上下文释义");
@@ -811,8 +837,16 @@ export class WordCompanion {
         gloss: message,
       });
     } catch (error) {
-      if (!signal.aborted && this.hover === hit && !this.disposed) {
-        this.renderGlossCard(hit, "释义暂不可用");
+      if (
+        !signal.aborted &&
+        this.hover === hit &&
+        this.sequence === sequence &&
+        !this.disposed
+      ) {
+        this.renderGlossCard(
+          hit,
+          fallback ? `词典参考：${fallback}` : "释义暂不可用",
+        );
         this.onChange({
           type: "error",
           message: `上下文释义暂不可用：${error.message}`,

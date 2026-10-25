@@ -62,3 +62,7 @@ pointer input. Side-button navigation is suppressed within attached pages.
 ## Fast contextual hover (0.2.2)
 
 Ready context-cache entries render synchronously on pointer hover. The host provides `loadGlossCache()` and `saveGlossCache(entries)` for at most 5000 validated entries, and awaits `flushGlossCache()` on exit. Each entry retains service/model, sentence and target-position identity. Prefetch starts after 60ms for visible or nearby pages, takes up to 100 candidates per page, and combines up to 12 individually contextualized words per request. Neighbouring pages reserve concurrency for visible text. Cold model responses remain asynchronous; cached UI updates do not imply zero cold inference latency.
+
+## Dictionary-first hover (0.2.5)
+
+The host loads pinned ECDICT translations through `dictionary.mjs` and provides `getDictionaryGloss(candidate)`. Dictionary hits display synchronously with a dictionary-source label and may contain multiple senses. They never enter the contextual AI cache. The same hover continues its AI request and replaces the card with a context-source label only if the pointer remains there. AI failure keeps the dictionary result. See THIRD_PARTY_NOTICES.md for provenance and generator checksums.

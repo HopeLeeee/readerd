@@ -172,8 +172,10 @@ try {
   await page.mouse.move(wordPoint.x, wordPoint.y);
   await page.waitForFunction(
     () =>
-      document.querySelector('[data-readerd-word-owned="gloss"]')
-        ?.textContent === "代谢",
+      /^(?:上下文：)?代谢$/.test(
+        document.querySelector('[data-readerd-word-owned="gloss"]')
+          ?.textContent || "",
+      ),
     null,
     { timeout: 10000 },
   );

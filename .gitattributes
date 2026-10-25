@@ -1,0 +1,2 @@
+# Preserve the byte-for-byte checksum of the generated offline dictionary.
+src/words/data/definitions.json -text

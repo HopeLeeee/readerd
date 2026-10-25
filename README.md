@@ -1,14 +1,16 @@
 # ReaderD
 
-配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.4 开发预览版**。
+配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.5 开发预览版**。
 
 ## 启动
 
-普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.4.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
+推荐使用 **安装版 `ReaderD-Setup-0.2.5.exe`**：安装向导可选择安装目录，并创建桌面与开始菜单快捷方式，之后直接启动已安装的 `ReaderD.exe`。安装版设置保存在 Windows 用户数据目录，卸载默认保留设置。Zotero 中选择安装目录里的 `ReaderD.exe`。
 
-开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.4/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
+也提供 **ZIP 绿色版 `ReaderD-0.2.5-win-x64.zip`**：解压一次，在目录中运行 `ReaderD.exe`，整个文件夹一起保留。它的配置在同目录的 `ReaderD-data`，适合移动使用。
 
-在 Zotero 的 PDF 打开程序中选择上述新版 `ReaderD.exe`。支持通过命令行传入 PDF 路径，启动后直接打开对应文件（包含中文、空格的路径也支持）。ReaderD 已运行时，会在现有窗口打开新文件并先保存当前批注，不会另外停留在首页。升级后需要在 Zotero 重新选择新版 EXE 路径。
+单文件便携版 `ReaderD-0.2.5.exe` 便于临时分发，但每次运行需要解包，不推荐用作 Zotero 的长期打开程序。0.2.4 本机两轮对比：单文件冷启动约13–17秒、已有窗口转交约33秒；目录版约2.4–3.5秒和1.1–1.3秒。同一核心代码，仅包装形式不同。
+
+源码开发可用 `npm install`、`npm start`；`npm run dist` 构建安装版、ZIP 与单文件三种产物。旧版运行时先保存并关闭旧窗口，再启动新版。升级时在 Zotero 重新选择新版的固定 EXE 路径。
 
 ## Windows 提示与签名
 
@@ -20,10 +22,10 @@
 
 ## 绿色版数据
 
-0.2.4 起，打包版默认把配置放在 **EXE 同目录的 `ReaderD-data` 文件夹**，不再写入 `%APPDATA%`：
+ZIP 和单文件绿色版把配置放在 **EXE 同目录的 `ReaderD-data` 文件夹**，不再写入 `%APPDATA%`：
 
 ```text
-ReaderD-0.2.4.exe
+ReaderD-0.2.5.exe
 ReaderD-data\
   settings.json
   ai-key.bin
@@ -33,7 +35,7 @@ ReaderD-data\
   Cache\ 等运行缓存
 ```
 
-- 第一次运行 0.2.4 时，如果 `ReaderD-data` 还没有配置，会从旧的 `%APPDATA%\readerd` 迁移 `settings.json`、`ai-key.bin`、`reading-profile.md`、`gloss-cache.json` 和 `Local State`，不会覆盖 `ReaderD-data` 中已有文件。
+- 第一次运行 0.2.5 时，如果 `ReaderD-data` 还没有配置，会从旧的 `%APPDATA%\readerd` 迁移 `settings.json`、`ai-key.bin`、`reading-profile.md`、`gloss-cache.json` 和 `Local State`，不会覆盖 `ReaderD-data` 中已有文件。
 - 移动软件时，把 EXE 和 `ReaderD-data` 文件夹一起移动即可保留设置、词表和缓存。
 - 删除 `ReaderD-data` 相当于清空本软件的配置、阅读画像、词表和词释缓存。
 - 如果 EXE 所在目录不可写（例如放在 `C:\Program Files`），会自动回退到 `%APPDATA%\readerd`。
@@ -132,7 +134,9 @@ AI 连接方式也可以选择本地 Codex。留空程序路径时会自动查�
 
 AI 章节识别发送章节候选文本与页面位置，悬停词释发送目标词及其所在句；不会发送 PDF 文件。打开或滚动到页面后，程序会在约 60 毫秒后提前预取可见正文与附近一屏的候选词释义（最多 6 个请求同时进行，邻页最多占用两个名额），悬停时优先读取缓存，未命中才单次请求。API 与 Codex 模式每页最多预取 100 个候选词，每 12 个词合并一个请求，各词保留自己的句子、目标位置与编号；连续失败会暂停预取 30 秒，避免反复请求。切换文献、页面卸载或退出时，会取消旧页的 HTTP 请求及 Codex 子进程，立即释放预取名额；旧结果不再写入缓存。
 
-缓存命中时取消固定悬停等待，立即显示；只保存校验合格的上下文词释，最多 5000 条，存于用户数据目录的 `gloss-cache.json`，重新打开仍可复用。缓存按服务、模型、原句与目标位置隔离，不把同一个词在不同语境下的释义混用。首次阅读尚未预热的内容仍需等待模型，尤其 Codex 冷调用可能需要数秒；不会用未经上下文确认的词典释义冒充模型结果。
+0.2.5 起，首次悬停优先立即显示本地 ECDICT 词义，标注“词典参考”；后台 AI 返回后替换为“上下文”释义。词典查不到的词保留等待提示，AI 失败时保留本地词义；词典多义不会写入上下文缓存。
+
+缓存命中时取消固定悬停等待，立即显示；只保存校验合格的上下文词释，最多 5000 条，存于用户数据目录的 `gloss-cache.json`，重新打开仍可复用。缓存按服务、模型、原句与目标位置隔离，不把同一个词在不同语境下的释义混用。首次阅读尚未预热的内容仍需等待模型，尤其 Codex 冷调用可能需要数秒；词典参考与 AI 结果明确区分。
 
 词释请求复用 ReaderC 的 `requestBody` / `batchRequestBody`：按句合并多个词，关闭推理（`reasoning_effort: none`、`enable_thinking: false`），单次限制 64 tokens，批量按词数限制输出长度，跨句时为每个目标单独提供上下文。服务明确拒绝可选参数时，仅移除该参数后重试，并按地址和模型缓存兼容结果；鉴权、额度和普通服务错误不会触发兼容重试。连接测试使用实际词释请求，避免仅通用请求能成功而词释失败。返回结果须为有效、简短的中文释义，截断或格式错误不缓存，下次悬停可以重试。远程服务需要 HTTPS，本地服务允许 HTTP。PDF 渲染、批注、规则目录、引用与基础推荐不需要联网。
 
@@ -149,6 +153,7 @@ npm run smoke:external-open
 npm run smoke:onboarding
 npm run smoke:codex
 npm run smoke:regression
+npm run smoke:hybrid-hover
 npm run smoke:hover-speed
 npm run smoke:codex-cancel
 npm run pack

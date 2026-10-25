@@ -73,6 +73,11 @@ export function preparePortableDataDir({
   const base = environment.PORTABLE_EXECUTABLE_DIR
     ? path.resolve(environment.PORTABLE_EXECUTABLE_DIR)
     : path.dirname(execPath);
+  if (
+    !environment.PORTABLE_EXECUTABLE_DIR &&
+    fs.existsSync(path.join(base, "readerd-installed"))
+  )
+    return null;
   const target = dataDirFor(base);
   if (!target || !isWritableDirectory(target)) return null;
 

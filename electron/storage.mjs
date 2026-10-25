@@ -9,7 +9,22 @@ export async function atomicWrite(file, data) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(temporary, data);
-    await fs.rename(temporary, file);
+    // Windows antivirus/indexers can briefly hold the destination. Retry the
+    // replace instead of failing a settings or gloss-cache write.
+    const delays = [20, 50, 100, 200];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.rename(temporary, file);
+        break;
+      } catch (error) {
+        if (
+          !["EPERM", "EBUSY", "EACCES"].includes(error.code) ||
+          attempt >= delays.length
+        )
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+      }
+    }
   } finally {
     await fs.rm(temporary, { force: true }).catch(() => {});
   }

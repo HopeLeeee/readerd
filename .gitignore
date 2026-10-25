@@ -2,6 +2,7 @@ node_modules/
 release/
 test-results/
 .research/
+ReaderD-data/
 *.log
 
 # Local ReaderD data and credentials must never be committed.

@@ -24,6 +24,7 @@ import { resolveReference } from "./reference-links.mjs";
 import { createGlossCacheStore } from "./gloss-cache.mjs";
 import { createChatTransport } from "./ai-transport.mjs";
 import { requestCodex } from "./codex-bridge.mjs";
+import { preparePortableDataDir } from "./portable-data.mjs";
 import ReaderCCore from "../src/words/readerc-core.js";
 import { pdfPathsFromArguments } from "./launch-files.mjs";
 
@@ -32,6 +33,16 @@ if (process.env.READERD_USER_DATA) {
   if (!path.isAbsolute(process.env.READERD_USER_DATA))
     throw new Error("READERD_USER_DATA must be absolute.");
   app.setPath("userData", process.env.READERD_USER_DATA);
+} else {
+  const legacyAppData =
+    process.env.READERD_LEGACY_DATA_DIR || app.getPath("appData");
+  const portable = preparePortableDataDir({
+    environment: process.env,
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    appDataDir: legacyAppData,
+  });
+  if (portable) app.setPath("userData", portable.path);
 }
 const chat = createChatTransport((...args) => net.fetch(...args));
 const aiRequests = new Map();

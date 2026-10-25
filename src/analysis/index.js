@@ -3,6 +3,8 @@ export {
   parseCitationNumbers,
   extractCitationMarkers,
   pageLines,
+  headingCandidates,
+  resolveOutlineEntries,
   recommendReferences,
   parseReference,
   filterOutline,

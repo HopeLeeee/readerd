@@ -2,6 +2,8 @@ import * as pdfjs from "../node_modules/pdfjs-dist/build/pdf.mjs";
 import {
   analyzeDocument,
   filterOutline,
+  headingCandidates,
+  resolveOutlineEntries,
   recommendReferences,
 } from "./analysis/index.js";
 import { loadDictionary, dictionaryGloss } from "./words/dictionary.mjs";
@@ -475,14 +477,11 @@ async function analyze(token) {
   if (token !== session) return;
   const result = analyzeDocument(pages, native);
   state.outline = result.outline;
-  const cached = state.cachedOutline.filter(
-    (e) =>
-      e.source === "AI" &&
-      pages.some(
-        (p) =>
-          p.page === e.page &&
-          p.items.some((i) => i.str.trim() === e.title.trim()),
-      ),
+  const candidates = headingCandidates(pages);
+  const cached = resolveOutlineEntries(
+    state.cachedOutline.filter((e) => e.source === "AI"),
+    pages,
+    candidates,
   );
   if (!native.length && cached.length) state.outline = cached;
   state.references = result.references;
@@ -490,21 +489,13 @@ async function analyze(token) {
   for (const view of state.views) if (view.rendered) decorateCitations(view);
   if (!native.length && !cached.length && aiEnabled()) {
     try {
-      const candidates = pages
-        .flatMap((p) =>
-          p.items
-            .filter((i) => i.str.length < 180)
-            .map((i) => ({
-              text: i.str,
-              page: p.page,
-              y: i.y,
-              height: i.height,
-            })),
-        )
+      const sourceCandidates = candidates
+        .filter((line) => line.text.length < 400)
+        .map(({ text, page, y, height }) => ({ text, page, y, height }))
         .slice(0, 1800);
       const result = await api.requestAI({
         kind: "outline",
-        payload: { candidates },
+        payload: { candidates: sourceCandidates },
       });
       if (token !== session) return;
       let entries = result?.outline || result;
@@ -513,22 +504,7 @@ async function analyze(token) {
         entries = entries.outline || entries;
       }
       if (Array.isArray(entries)) {
-        const validated = entries.flatMap((e) => {
-          if (typeof e.title !== "string") return [];
-          const p = pages.find((p) => p.page === Number(e.page));
-          const item = p?.items.find((i) => i.str.trim() === e.title.trim());
-          return item
-            ? [
-                {
-                  title: item.str,
-                  page: p.page,
-                  y: item.y,
-                  level: Math.max(1, Math.min(4, Number(e.level) || 1)),
-                  source: "AI",
-                },
-              ]
-            : [];
-        });
+        const validated = resolveOutlineEntries(entries, pages, candidates);
         if (validated.length) {
           state.outline = validated;
           renderOutline();

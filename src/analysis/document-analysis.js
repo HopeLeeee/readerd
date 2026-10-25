@@ -54,17 +54,34 @@ export function pageLines(page) {
     let group = [];
     const flush = () => {
       if (!group.length) return;
+      const fontLengths = new Map();
+      let text = "";
+      for (const [index, item] of group.entries()) {
+        const previous = group[index - 1];
+        const gap = previous
+          ? item.x - (previous.x + (previous.width || 0))
+          : 0;
+        const space =
+          previous &&
+          (gap > row.height * 0.12 ||
+            /\s$/.test(previous.str) ||
+            /^\s/.test(item.str));
+        text += (space ? " " : "") + item.str.trim();
+        fontLengths.set(
+          item.fontName || "",
+          (fontLengths.get(item.fontName || "") || 0) + item.str.trim().length,
+        );
+      }
       lines.push({
-        text: group
-          .map((item) => item.str.trim())
-          .join(" ")
-          .replace(/\s+/g, " "),
+        text: text.replace(/\s+/g, " "),
         x: group[0].x,
         y: row.y,
         height: median(group.map((item) => Math.abs(item.height) || 10)),
         page: page.page,
         width: page.width,
-        fontName: group[0].fontName || "",
+        fontName: [...fontLengths].sort((a, b) => b[1] - a[1])[0][0],
+        fontNames: [...fontLengths.keys()],
+        endX: Math.max(...group.map((item) => item.x + (item.width || 0))),
       });
       group = [];
     };
@@ -96,6 +113,126 @@ function columnOrder(lines) {
       a.y - b.y ||
       a.x - b.x,
   );
+}
+
+/** Reassemble typographic heading blocks before exposing them to AI or heuristics.
+ * Font changes within a word or organism name never become separate candidates. */
+export function headingCandidates(pages) {
+  const lines = pages.flatMap((page) => pageLines(page));
+  const bodyHeight = median(
+    lines.filter((line) => line.text.length > 45).map((line) => line.height),
+  );
+  const fonts = new Map();
+  for (const line of lines.filter(
+    (line) => line.text.length > 45 && line.height <= bodyHeight * 1.1,
+  ))
+    fonts.set(
+      line.fontName,
+      (fonts.get(line.fontName) || 0) + line.text.length,
+    );
+  const bodyFont = [...fonts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const headingStyle = (line) =>
+    line.height > bodyHeight * 1.12 ||
+    /bold|semibold/i.test(line.fontName) ||
+    (bodyFont && line.fontName !== bodyFont);
+  const standalone = (text) => SECTION_HEADING.test(text) && !/^\d/.test(text);
+  const result = [];
+  for (const page of pages) {
+    let block;
+    for (const line of columnOrder(
+      lines.filter((line) => line.page === page.page),
+    )) {
+      const previous = block?.lines.at(-1);
+      const continues =
+        previous &&
+        headingStyle(block.lines[0]) &&
+        headingStyle(line) &&
+        !standalone(previous.text) &&
+        !standalone(line.text) &&
+        !/^\d+(?:\.\d+)*[.)]?\s+/.test(line.text) &&
+        (previous.text.length >= 32 ||
+          /\b(?:and|or|of|in|for|with|by|the|a|an|to|via|on|at)\s*$/i.test(
+            previous.text,
+          ) ||
+          /[-–(]$/.test(previous.text) ||
+          /^\p{Ll}/u.test(line.text)) &&
+        Math.abs(line.x - block.x) <= Math.max(12, page.width * 0.02) &&
+        line.y > previous.y &&
+        line.y - previous.y <= Math.max(line.height, previous.height) * 1.6 &&
+        Math.min(line.height, previous.height) >=
+          Math.max(line.height, previous.height) * 0.85 &&
+        block.text.length + line.text.length < 400;
+      if (continues) {
+        block.text += (/-$/.test(block.text) ? "" : " ") + line.text;
+        block.lines.push(line);
+        block.endX = Math.max(block.endX, line.endX);
+      } else {
+        block = { ...line, lines: [line] };
+        result.push(block);
+      }
+    }
+  }
+  return result;
+}
+
+/** Validate full AI titles; repair legacy cached titles only from exact PDF fragments. */
+export function resolveOutlineEntries(
+  entries,
+  pages,
+  candidates = headingCandidates(pages),
+) {
+  const compact = (value) =>
+    String(value || "")
+      .normalize("NFKC")
+      .replace(/\s+/g, "");
+  const resolved = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    if (typeof entry?.title !== "string") continue;
+    const page = pages.find((page) => page.page === Number(entry.page));
+    if (!page) continue;
+    const choices = candidates.filter(
+      (candidate) => candidate.page === page.page,
+    );
+    const exact = choices.filter(
+      (candidate) => compact(candidate.text) === compact(entry.title),
+    );
+    // Exact raw text provenance is required before expanding an old fragment.
+    const fragments = page.items.filter(
+      (item) => item.str.trim() === entry.title.trim(),
+    );
+    const matches = exact.length
+      ? exact
+      : choices.filter((candidate) =>
+          fragments.some((item) =>
+            candidate.lines.some(
+              (line) =>
+                Math.abs(line.y - item.y) < line.height * 0.4 &&
+                item.x >= line.x - 2 &&
+                item.x <= line.endX + 2,
+            ),
+          ),
+        );
+    matches.sort(
+      (a, b) =>
+        Math.abs(a.y - (Number(entry.y) || 0)) -
+        Math.abs(b.y - (Number(entry.y) || 0)),
+    );
+    const match = matches[0];
+    if (!match) continue;
+    const key = `${page.page}:${match.x}:${match.y}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolved.push({
+      title: match.text,
+      page: page.page,
+      x: match.x,
+      y: match.y,
+      level: Math.max(1, Math.min(4, Number(entry.level) || 1)),
+      source: entry.source || "AI",
+    });
+  }
+  return resolved;
 }
 
 function referenceStart(text) {
@@ -292,14 +429,13 @@ export function analyzeDocument(pages, nativeOutline = []) {
   const bodyHeight = median(
     allLines.filter((line) => line.text.length > 45).map((line) => line.height),
   );
-  const inferredOutline = allLines
+  const inferredOutline = headingCandidates(pages)
     .filter(
       (line) =>
-        line.text.length <= 120 &&
+        line.text.length <= 400 &&
         !(/^\d+[.)]?\s/.test(line.text) && /[.;]$/.test(line.text)) &&
         (SECTION_HEADING.test(line.text) ||
           (line.height > bodyHeight * 1.2 &&
-            line.text.length < 90 &&
             !/[.!?]$/.test(line.text) &&
             !/^\d+$/.test(line.text))),
     )

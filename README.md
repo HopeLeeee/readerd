@@ -1,12 +1,12 @@
 # ReaderD
 
-配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.6 开发预览版**。
+配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.7 开发预览版**。
 
 ## 启动
 
-推荐使用 **安装版 `ReaderD-Setup-0.2.6.exe`**：安装向导可选择安装目录，并创建桌面与开始菜单快捷方式，之后直接启动已安装的 `ReaderD.exe`。安装版设置保存在 Windows 用户数据目录，卸载默认保留设置。Zotero 中选择安装目录里的 `ReaderD.exe`。
+推荐使用 **安装版 `ReaderD-Setup-0.2.7.exe`**：安装向导可选择安装目录，并创建桌面与开始菜单快捷方式，之后直接启动已安装的 `ReaderD.exe`。安装版设置保存在 Windows 用户数据目录，卸载默认保留设置。Zotero 中选择安装目录里的 `ReaderD.exe`。
 
-项目也支持 **ZIP 绿色版**：解压一次，在目录中运行 `ReaderD.exe`，整个文件夹一起保留。它的配置在同目录的 `ReaderD-data`，适合移动使用。每版提供的下载文件以 Release 附件为准；0.2.6 提供安装版。
+项目也支持 **ZIP 绿色版**：解压一次，在目录中运行 `ReaderD.exe`，整个文件夹一起保留。它的配置在同目录的 `ReaderD-data`，适合移动使用。每版提供的下载文件以 Release 附件为准；0.2.7 提供安装版。
 
 单文件便携版便于临时分发，但每次运行需要解包，不推荐用作 Zotero 的长期打开程序。0.2.4 本机两轮对比：单文件冷启动约13–17秒、已有窗口转交约33秒；目录版约2.4–3.5秒和1.1–1.3秒。同一核心代码，仅包装形式不同。
 
@@ -25,7 +25,7 @@
 ZIP 和单文件绿色版把配置放在 **EXE 同目录的 `ReaderD-data` 文件夹**，不再写入 `%APPDATA%`：
 
 ```text
-ReaderD-0.2.6.exe
+ReaderD-0.2.7.exe
 ReaderD-data\
   settings.json
   ai-key.bin
@@ -35,7 +35,7 @@ ReaderD-data\
   Cache\ 等运行缓存
 ```
 
-- 第一次运行 0.2.6 时，如果 `ReaderD-data` 还没有配置，会从旧的 `%APPDATA%\readerd` 迁移 `settings.json`、`ai-key.bin`、`reading-profile.md`、`gloss-cache.json` 和 `Local State`，不会覆盖 `ReaderD-data` 中已有文件。
+- 第一次运行 0.2.7 时，如果 `ReaderD-data` 还没有配置，会从旧的 `%APPDATA%\readerd` 迁移 `settings.json`、`ai-key.bin`、`reading-profile.md`、`gloss-cache.json` 和 `Local State`，不会覆盖 `ReaderD-data` 中已有文件。
 - 移动软件时，把 EXE 和 `ReaderD-data` 文件夹一起移动即可保留设置、词表和缓存。
 - 删除 `ReaderD-data` 相当于清空本软件的配置、阅读画像、词表和词释缓存。
 - 如果 EXE 所在目录不可写（例如放在 `C:\Program Files`），会自动回退到 `%APPDATA%\readerd`。

@@ -271,7 +271,7 @@ async function registerHandlers() {
     if (!content || content.length > 300000)
       throw new Error("AI 请求内容过大。请仅发送必要的文本片段。");
     const format = ["outline", "chapters"].includes(kind)
-      ? 'Return only JSON {"outline":[{"title":"exact source title","page":1,"y":0,"level":1}]}. Select titles ONLY from supplied candidates. Preserve each candidate page and y coordinate exactly; use level 1 to 3. Never invent headings.'
+      ? 'Return only JSON {"outline":[{"title":"exact source title","page":1,"y":0,"level":1}]}. Each candidate is a complete layout block with inline font changes and wrapped heading lines already joined. Select titles ONLY from supplied candidates, copying the ENTIRE text including gene names and organism names. Never split a candidate into shorter titles. Preserve each candidate page and y coordinate exactly; use level 1 to 3. Never invent headings.'
       : kind === "gloss" || kind === "definition"
         ? 'Return only JSON {"gloss":"简短中文释义"}. Give the target word or phrase meaning in the supplied sentence, not a dictionary list. Do not include explanations.'
         : kind === "glossBatch"

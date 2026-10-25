@@ -1,6 +1,6 @@
 {
   "name": "readerd",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "A quiet PDF reading companion for ReaderC",
@@ -25,7 +25,11 @@
     "smoke:navigation": "node tools/navigation-smoke.mjs",
     "smoke:external-open": "node tools/external-open-smoke.mjs",
     "smoke:onboarding": "node tools/onboarding-smoke.mjs",
-    "smoke:codex": "node tools/codex-smoke.mjs"
+    "smoke:codex": "node tools/codex-smoke.mjs",
+    "smoke:hover-speed": "node tools/hover-speed-smoke.mjs",
+    "smoke:portable": "node tools/portable-smoke.mjs",
+    "smoke:codex-cancel": "node tools/codex-cancel-smoke.mjs",
+    "smoke:regression": "node tools/audit-ai-repro.mjs && node tools/audit-prefetch-repro.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
@@ -42,7 +46,7 @@
     "appId": "io.hopeleeee.readerd",
     "productName": "ReaderD",
     "directories": {
-      "output": "release/0.2.0"
+      "output": "release/0.2.2"
     },
     "files": [
       "electron/**/*",

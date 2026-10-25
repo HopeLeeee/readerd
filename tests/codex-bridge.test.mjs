@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
+import { EventEmitter, getEventListeners } from "node:events";
 import { PassThrough } from "node:stream";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -133,6 +133,7 @@ test("Codex launcher uses exact executable without shell, isolated cwd, bounded 
       child.stdin.on("data", (chunk) => (input += chunk));
       child.kill = () => {
         child.killed = true;
+        setImmediate(() => child.emit("close", null));
       };
       captured = {
         file,
@@ -199,6 +200,75 @@ test("Codex launcher uses exact executable without shell, isolated cwd, bounded 
       /超时设置无效/,
     );
   } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex cancellation rejects before spawn and kills active process without accepting late output", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "readerd-codex-abort-"));
+  const exe = path.join(root, "codex.exe");
+  await fs.writeFile(exe, "fixture");
+  let captured;
+  let spawned;
+  const ready = new Promise((resolve) => {
+    spawned = resolve;
+  });
+  const bridge = createCodexBridge({
+    tempRoot: root,
+    spawnProcess: (file, args, options) => {
+      const child = new EventEmitter();
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = () => {
+        child.killed = true;
+      };
+      captured = { child, cwd: options.cwd };
+      spawned();
+      return child;
+    },
+  });
+  try {
+    const alreadyAborted = AbortSignal.abort();
+    await assert.rejects(
+      bridge.requestCodex({
+        executable: exe,
+        prompt: "test",
+        signal: alreadyAborted,
+      }),
+      { name: "AbortError" },
+    );
+    assert.equal(captured, undefined);
+    assert.deepEqual(await fs.readdir(root), ["codex.exe"]);
+    const controller = new AbortController();
+    const pending = bridge.requestCodex({
+      executable: exe,
+      prompt: "test",
+      signal: controller.signal,
+    });
+    await ready;
+    controller.abort();
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.equal(captured.child.killed, true);
+    assert.ok(
+      (await fs.stat(captured.cwd)).isDirectory(),
+      "cleanup waits for child close",
+    );
+    assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+    assert.equal(captured.child.stdout.listenerCount("data"), 0);
+    captured.child.stdout.write(result("late answer must not succeed"));
+    captured.child.emit("close", 0);
+    for (
+      let i = 0;
+      i < 100 && (await fs.stat(captured.cwd).catch(() => null));
+      i++
+    )
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(await fs.stat(captured.cwd).catch(() => null), null);
+    assert.equal(captured.child.listenerCount("error"), 0);
+    assert.equal(captured.child.listenerCount("close"), 0);
+  } finally {
+    captured?.child.emit("close", null);
     await fs.rm(root, { recursive: true, force: true });
   }
 });

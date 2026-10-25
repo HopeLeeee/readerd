@@ -294,7 +294,7 @@ test("hovering an unmarked word does not translate it, but side buttons can stil
   companion.destroy();
 });
 
-test("prefetch batches candidate words by sentence and serves hover from cache", async () => {
+test("prefetch batches adjacent candidates and serves hover from cache", async () => {
   const batches = [],
     inserted = [];
   let singleCalls = 0;
@@ -448,7 +448,7 @@ test("failed prefetch stays silent and enables a direct hover retry", async () =
   companion.destroy();
 });
 
-test("prefetch starts sentence groups concurrently and respects its concurrency limit", async () => {
+test("prefetch starts mixed-context batches concurrently and respects its concurrency limit", async () => {
   const started = [],
     resolvers = [],
     inserted = [];
@@ -476,7 +476,7 @@ test("prefetch starts sentence groups concurrently and respects its concurrency 
     hits: [],
     cleanup: [],
   };
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 96; i++) {
     const word = `term${i}`;
     const candidate = {
       word,
@@ -520,7 +520,7 @@ test("prefetch starts sentence groups concurrently and respects its concurrency 
   assert.equal(started.length, 8, "queued batches should start as slots free");
   for (const resolve of resolvers.splice(0)) resolve();
   await job;
-  assert.equal(companion.cache.size, 8);
+  assert.equal(companion.cache.size, 96);
   companion.destroy();
 });
 
@@ -573,4 +573,307 @@ test("local lexicon loader reports missing or invalid assets rather than using f
     }),
     /格式无效/,
   );
+});
+
+const settleRequests = () => new Promise((resolve) => setImmediate(resolve));
+function requestPage(prefix, count = 1) {
+  const page = { pageNumber: 1, cleanup: [], hits: [] };
+  page.hits = Array.from({ length: count }, (_, index) => ({
+    prefetch: true,
+    page,
+    candidate: {
+      word: `${prefix}${index}`,
+      lemma: `${prefix}${index}`,
+      sentence: `${prefix} sentence ${index}`,
+      targetStart: 0,
+      targetEnd: 2,
+    },
+  }));
+  return page;
+}
+
+test("detaching a document aborts active and queued prefetch and frees slots immediately", async () => {
+  const calls = [];
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex" }),
+    requestGlossBatch: (candidates, { signal }) =>
+      new Promise((resolve) => {
+        calls.push({ candidates, signal, resolve }); // Deliberately ignore abort.
+      }),
+  });
+  companion.isPageVisible = () => true;
+  const old = requestPage("same", 96);
+  companion.pages.set(1, old);
+  const oldJob = companion.prefetchPage(1);
+  await settleRequests();
+  assert.equal(calls.length, 6);
+  assert.equal(companion.prefetchWaiting.length, 2);
+  companion.detachPage(1);
+  assert.equal(companion.prefetchActive, 0);
+  assert.equal(companion.prefetchWaiting.length, 0);
+  assert.equal(companion.pending.size, 0);
+  assert.equal(companion.prefetchQueued.size, 0);
+  assert.ok(calls.every(({ signal }) => signal.aborted));
+
+  // Same context in the next document must have a fresh owner, even while old
+  // promise finally handlers and transport completions are still outstanding.
+  const next = requestPage("same");
+  companion.pages.set(1, next);
+  const nextJob = companion.prefetchPage(1);
+  await settleRequests();
+  assert.equal(calls.length, 7);
+  const key = companion.glossKey(next.hits[0].candidate);
+  const nextPending = companion.pending.get(key);
+  for (const call of calls.slice(0, 6))
+    call.resolve(
+      JSON.stringify(
+        call.candidates.map(({ word }) => ({ word, gloss: "旧释义" })),
+      ),
+    );
+  await oldJob;
+  await settleRequests();
+  assert.equal(companion.pending.get(key), nextPending);
+  assert.equal(companion.cache.size, 0);
+  calls[6].resolve(JSON.stringify([{ word: "same0", gloss: "新释义" }]));
+  await nextJob;
+  assert.equal(companion.cache.get(key).gloss, "新释义");
+  assert.equal(companion.prefetchActive, 0);
+  companion.destroy();
+});
+
+test("detached hover requests are aborted, cannot cache late output, and cannot delete a new request", async () => {
+  const calls = [];
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex" }),
+    requestGloss: (candidate, { signal }) =>
+      new Promise((resolve) => calls.push({ signal, resolve })),
+  });
+  companion.renderGlossCard = () => {};
+  const old = requestPage("word");
+  companion.pages.set(1, old);
+  companion.hover = old.hits[0];
+  const oldJob = companion.showGloss(old.hits[0]);
+  await settleRequests();
+  companion.detachPage(1);
+  assert.ok(calls[0].signal.aborted);
+  const next = requestPage("word");
+  companion.pages.set(1, next);
+  companion.hover = next.hits[0];
+  const nextJob = companion.showGloss(next.hits[0]);
+  await settleRequests();
+  const key = companion.glossKey(next.hits[0].candidate);
+  const pending = companion.pending.get(key);
+  calls[0].resolve({ gloss: "旧释义" });
+  await oldJob;
+  assert.equal(companion.cache.size, 0);
+  assert.equal(companion.pending.get(key), pending);
+  calls[1].resolve({ gloss: "新释义" });
+  await nextJob;
+  assert.equal(companion.cache.get(key).gloss, "新释义");
+  companion.destroy();
+});
+
+test("malformed glosses never enter cache and the next hover retries", async () => {
+  let calls = 0;
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex" }),
+    requestGloss: async () =>
+      ++calls === 1 ? { gloss: '{"gloss":"酶' } : { gloss: "酶" },
+  });
+  companion.renderGlossCard = () => {};
+  const page = requestPage("enzyme");
+  companion.pages.set(1, page);
+  companion.hover = page.hits[0];
+  await companion.showGloss(page.hits[0]);
+  assert.equal(companion.cache.size, 0);
+  await companion.showGloss(page.hits[0]);
+  assert.equal(calls, 2);
+  assert.equal(companion.cache.values().next().value.gloss, "酶");
+  companion.destroy();
+});
+
+test("stopPrefetch cancels active transports instead of waiting for endpoint timeout", async () => {
+  let signal;
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex" }),
+    requestGlossBatch: (_, options) => {
+      signal = options.signal;
+      return new Promise(() => {});
+    },
+  });
+  companion.isPageVisible = () => true;
+  companion.pages.set(1, requestPage("word"));
+  const job = companion.prefetchPage(1);
+  await settleRequests();
+  companion.stopPrefetch();
+  assert.ok(signal.aborted);
+  assert.equal(companion.prefetchActive, 0);
+  await job;
+  assert.equal(companion.pending.size, 0);
+  assert.equal(companion.prefetchFailures, 0);
+  companion.destroy();
+});
+
+test("warm hover renders synchronously without a hover timer or network roundtrip", async () => {
+  let requests = 0;
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex", hoverDelay: 120 }),
+    requestGloss: async () => {
+      requests++;
+      return { gloss: "不应请求" };
+    },
+  });
+  const page = requestPage("enzyme");
+  const hit = page.hits[0];
+  companion.cache.set(companion.glossKey(hit.candidate), { gloss: "酶" });
+  companion.hitAt = () => hit;
+  const cards = [];
+  companion.renderGlossCard = (_, text) => cards.push(text);
+  companion.handlePointer({ buttons: 0, target: { closest: () => null } });
+  assert.deepEqual(cards, ["酶"]);
+  assert.equal(companion.timer, undefined);
+  assert.equal(requests, 0);
+  companion.destroy();
+});
+
+test("persisted context glosses survive a restart and reject malformed cached output", async () => {
+  let persisted = [];
+  const options = {
+    getSettings: () => ({ provider: "codex" }),
+    loadGlossCache: async () => persisted,
+    saveGlossCache: async (entries) => {
+      persisted = structuredClone(entries);
+    },
+  };
+  const first = await new WordCompanion(options).initialize();
+  const candidate = requestPage("enzyme").hits[0].candidate;
+  const key = first.glossKey(candidate);
+  first.rememberGloss(key, { gloss: "酶", source: "prefetch" });
+  await first.flushGlossCache();
+  first.destroy();
+  persisted.push(["broken", { gloss: '{"gloss":"截断' }]);
+  let requests = 0;
+  const second = await new WordCompanion({
+    ...options,
+    requestGloss: async () => {
+      requests++;
+    },
+  }).initialize();
+  assert.equal(second.cache.has("broken"), false);
+  assert.equal(second.cache.get(key).gloss, "酶");
+  second.renderGlossCard = (_, message) => assert.equal(message, "酶");
+  const hit = requestPage("enzyme").hits[0];
+  second.hover = hit;
+  await second.showGloss(hit);
+  assert.equal(requests, 0);
+  assert.notEqual(
+    second.glossKey({ ...candidate, sentence: "Different context." }),
+    key,
+  );
+  second.getSettings = () => ({
+    endpoint: "https://api.test/v1",
+    model: "test",
+  });
+  assert.notEqual(second.glossKey(candidate), key);
+  second.destroy();
+});
+
+test("cache flush includes writes added during disk I/O and preserves failed writes for retry", async () => {
+  let release,
+    writes = 0,
+    saved;
+  const companion = new WordCompanion({
+    saveGlossCache: async (entries) => {
+      writes++;
+      if (writes === 1) throw new Error("disk busy");
+      if (writes === 2)
+        await new Promise((resolve) => {
+          release = resolve;
+        });
+      saved = structuredClone(entries);
+    },
+  });
+  companion.rememberGloss("one", { gloss: "一" });
+  await assert.rejects(companion.flushGlossCache(), /disk busy/);
+  assert.equal(companion.cacheSavedRevision, 0);
+  const pending = companion.flushGlossCache();
+  await settleRequests();
+  companion.rememberGloss("two", { gloss: "二" });
+  release();
+  await pending;
+  assert.equal(writes, 3);
+  assert.equal(saved.length, 2);
+  assert.equal(companion.cacheSavedRevision, companion.cacheRevision);
+  companion.destroy();
+});
+
+test("a page ahead can prefetch but reserves slots for visible text and retains mixed contexts", async () => {
+  const calls = [];
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex" }),
+    requestGlossBatch: (words) =>
+      new Promise((resolve) => calls.push({ words, resolve })),
+  });
+  function setGeometry(page, top) {
+    page.container = {
+      ownerDocument: { defaultView: { innerWidth: 1000, innerHeight: 800 } },
+      getBoundingClientRect: () => ({
+        top,
+        bottom: top + 700,
+        left: 0,
+        right: 800,
+      }),
+    };
+  }
+  const next = requestPage("next", 100);
+  next.pageNumber = 2;
+  setGeometry(next, 900);
+  companion.pages.set(2, next);
+  const nearJob = companion.prefetchPage(next);
+  await settleRequests();
+  assert.equal(
+    calls.length,
+    2,
+    "a neighbouring page cannot occupy all six slots",
+  );
+  assert.equal(calls[0].words.length, 12);
+  assert.equal(new Set(calls[0].words.map((word) => word.sentence)).size, 12);
+  const current = requestPage("current", 36);
+  setGeometry(current, 0);
+  companion.pages.set(1, current);
+  const currentJob = companion.prefetchPage(current);
+  await settleRequests();
+  assert.equal(calls.length, 5);
+  assert.equal(calls[2].words[0].word, "current0");
+  companion.stopPrefetch();
+  await Promise.all([nearJob, currentJob]);
+  companion.destroy();
+});
+
+test("prefetch prioritizes current viewport upper text and covers all page targets without scrolling", async () => {
+  const batches = [];
+  const companion = new WordCompanion({
+    getSettings: () => ({ provider: "codex" }),
+    requestGlossBatch: async (words) => {
+      batches.push(words);
+      return JSON.stringify(
+        words.map((word, id) => ({ id, word: word.word, gloss: "释义" })),
+      );
+    },
+  });
+  companion.isPageVisible = () => true;
+  const page = requestPage("word", 100);
+  // PDF text order can put a lower column before the text at the top.
+  page.hits.forEach((hit, index) => {
+    hit.range = {
+      getBoundingClientRect: () => ({ top: index < 50 ? 600 : 100 }),
+    };
+  });
+  companion.pages.set(1, page);
+  await companion.prefetchPage(page);
+  assert.equal(batches.length, 9);
+  assert.equal(batches[0][0].word, "word50");
+  assert.equal(companion.cache.size, 100);
+  assert.ok(batches.every((words) => words.length <= 12));
+  companion.destroy();
 });

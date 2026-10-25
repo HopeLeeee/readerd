@@ -12,11 +12,31 @@ const STATUS = Object.freeze({
   unknown: "unknown",
 });
 const EDITABLE = 'input,textarea,[contenteditable],[role="textbox"]';
-const CACHE_LIMIT = 2000;
-const PREFETCH_BATCH = 10;
-const PREFETCH_LIMIT = 60;
-const CODEX_PREFETCH_LIMIT = 12;
+const CACHE_LIMIT = 5000;
+const PREFETCH_BATCH = 12;
+const PREFETCH_LIMIT = 100;
 const PREFETCH_CONCURRENCY = 6;
+
+function abortError() {
+  return new DOMException("Page was detached", "AbortError");
+}
+
+// Providers normally abort their transport too. Racing also releases readers
+// immediately when an older provider ignores AbortSignal.
+function withAbort(work, signal) {
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(abortError());
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve()
+      .then(() => {
+        if (signal.aborted) throw abortError();
+        return work();
+      })
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
+  });
+}
 
 function aiConfigured(settings = {}) {
   return (
@@ -97,6 +117,8 @@ export class WordCompanion {
     onChange = () => {},
     loadState = async () => ({}),
     saveState = async () => {},
+    loadGlossCache = async () => [],
+    saveGlossCache = async () => {},
   } = {}) {
     Object.assign(this, {
       getSettings,
@@ -105,13 +127,19 @@ export class WordCompanion {
       onChange,
       loadState,
       saveState,
+      loadGlossCache,
+      saveGlossCache,
     });
     this.vocabulary = Object.create(null);
     this.pages = new Map();
     this.cache = new Map();
+    this.cacheRevision = 0;
+    this.cacheSavedRevision = 0;
+    this.cacheWrite = null;
     this.pending = new Map();
     this.queue = Promise.resolve();
-    this.prefetchQueued = new Set();
+    this.prefetchQueued = new Map();
+    this.pendingOwners = new Map();
     this.prefetchActive = 0;
     this.prefetchWaiting = [];
     this.prefetchFailures = 0;
@@ -126,6 +154,23 @@ export class WordCompanion {
     const stored = await this.loadState();
     if (!this.disposed)
       this.vocabulary = core.cleanVocabulary(stored?.vocabulary ?? stored);
+    const cached = await this.loadGlossCache().catch(() => []);
+    if (!this.disposed && Array.isArray(cached)) {
+      for (const entry of cached.slice(-CACHE_LIMIT)) {
+        if (
+          !Array.isArray(entry) ||
+          typeof entry[0] !== "string" ||
+          entry[0].length > 10000
+        )
+          continue;
+        const result = this.normalizeGloss(entry[1]);
+        if (result)
+          this.cache.set(entry[0], {
+            gloss: result.gloss,
+            source: String(result.source || "cache").slice(0, 40),
+          });
+      }
+    }
     return this;
   }
 
@@ -151,14 +196,114 @@ export class WordCompanion {
 
   normalizeGloss(raw) {
     const result = typeof raw === "string" ? { gloss: raw } : raw;
-    return result?.gloss ? result : null;
+    return core.saneGloss(result?.gloss)
+      ? { ...result, gloss: result.gloss.trim() }
+      : null;
+  }
+
+  pageSignal(page) {
+    page.requestController ??= new AbortController();
+    return page.requestController.signal;
+  }
+
+  cancelPageRequests(page) {
+    page.requestController?.abort();
+    for (const [key, owner] of this.pendingOwners) {
+      if (owner !== page) continue;
+      this.pending.delete(key);
+      this.pendingOwners.delete(key);
+    }
+    for (const [key, owner] of this.prefetchQueued)
+      if (owner === page) this.prefetchQueued.delete(key);
   }
 
   rememberGloss(key, result) {
     this.cache.delete(key);
-    this.cache.set(key, result);
+    this.cache.set(key, { gloss: result.gloss, source: result.source || "ai" });
+    this.cacheRevision++;
+    this.scheduleCacheSave();
     while (this.cache.size > CACHE_LIMIT)
       this.cache.delete(this.cache.keys().next().value);
+  }
+
+  scheduleCacheSave(delay = 300) {
+    if (this.cacheSaveTimer) return;
+    this.cacheSaveTimer = setTimeout(() => {
+      this.cacheSaveTimer = null;
+      this.flushGlossCache().catch(() => {});
+    }, delay);
+    this.cacheSaveTimer.unref?.();
+  }
+
+  async flushGlossCache() {
+    clearTimeout(this.cacheSaveTimer);
+    this.cacheSaveTimer = null;
+    if (this.cacheWrite) {
+      await this.cacheWrite;
+      if (this.cacheRevision !== this.cacheSavedRevision)
+        return this.flushGlossCache();
+      return;
+    }
+    this.cacheWrite = (async () => {
+      while (this.cacheRevision !== this.cacheSavedRevision) {
+        const revision = this.cacheRevision;
+        await this.saveGlossCache([...this.cache]);
+        this.cacheSavedRevision = revision;
+      }
+    })();
+    try {
+      await this.cacheWrite;
+    } catch (error) {
+      this.scheduleCacheSave(1000);
+      throw error;
+    } finally {
+      this.cacheWrite = null;
+    }
+  }
+
+  isPageNear(page) {
+    if (this.isPageVisible(page)) return true;
+    const rect = page.container?.getBoundingClientRect?.();
+    const win = page.container?.ownerDocument?.defaultView;
+    return !!(
+      rect &&
+      win &&
+      rect.bottom > -win.innerHeight &&
+      rect.top < win.innerHeight * 2 &&
+      rect.right > 0 &&
+      rect.left < win.innerWidth
+    );
+  }
+
+  prefetchPriority(page) {
+    if (this.isPageVisible(page)) return 0;
+    return 1;
+  }
+
+  prioritizedHits(page) {
+    const height =
+      page.container?.ownerDocument?.defaultView?.innerHeight || 800;
+    const priority = (hit) => {
+      const rect = hit.range?.getBoundingClientRect?.();
+      if (!rect || !Number.isFinite(rect.top)) return [3, 0];
+      return [
+        rect.top >= 0 && rect.top < height / 2
+          ? 0
+          : rect.top >= 0 && rect.top < height
+            ? 1
+            : 2,
+        rect.top,
+      ];
+    };
+    return [...(page.hits || [])].sort((a, b) => {
+      const pa = priority(a),
+        pb = priority(b);
+      return (
+        pa[0] - pb[0] ||
+        pa[1] - pb[1] ||
+        (a.candidate.start || 0) - (b.candidate.start || 0)
+      );
+    });
   }
 
   isPageVisible(page) {
@@ -173,59 +318,90 @@ export class WordCompanion {
     );
   }
 
-  /** Warm the gloss cache for a rendered page shortly after it becomes visible. */
+  /** Warm rendered pages up to one viewport ahead of reading. */
   schedulePrefetch(page) {
     if (this.disposed || this.prefetchStopped || page.prefetchScheduled) return;
-    if (
-      !this.requestGlossBatch ||
-      !this.aiEnabled() ||
-      !this.isPageVisible(page)
-    )
+    if (!this.requestGlossBatch || !this.aiEnabled() || !this.isPageNear(page))
       return;
-    const delay = this.getSettings().provider === "codex" ? 1200 : 60;
+    const delay = 60;
     page.prefetchScheduled = setTimeout(() => {
       page.prefetchScheduled = null;
       this.prefetchPage(page).catch(() => {});
     }, delay);
   }
 
-  acquirePrefetchSlot() {
-    if (this.prefetchActive < PREFETCH_CONCURRENCY) {
-      this.prefetchActive++;
-      return Promise.resolve();
+  drainPrefetchSlots() {
+    this.prefetchWaiting.sort(
+      (a, b) => this.prefetchPriority(a.page) - this.prefetchPriority(b.page),
+    );
+    while (
+      this.prefetchActive < PREFETCH_CONCURRENCY &&
+      this.prefetchWaiting.length
+    ) {
+      // Leave room for the page being read when only neighbouring pages are ready.
+      const index = this.prefetchWaiting.findIndex(
+        (waiting) =>
+          this.prefetchPriority(waiting.page) === 0 || this.prefetchActive < 2,
+      );
+      if (index < 0) break;
+      this.prefetchWaiting.splice(index, 1)[0].start();
     }
-    return new Promise((resolve) => this.prefetchWaiting.push(resolve));
   }
 
-  releasePrefetchSlot() {
-    this.prefetchActive = Math.max(0, this.prefetchActive - 1);
-    const next = this.prefetchWaiting.shift();
-    if (next) {
-      this.prefetchActive++;
-      next();
-    }
+  acquirePrefetchSlot(signal, page) {
+    if (signal.aborted) return Promise.reject(abortError());
+    return new Promise((resolve, reject) => {
+      const waiting = { start: null, page };
+      const abortWaiting = () => {
+        const index = this.prefetchWaiting.indexOf(waiting);
+        if (index >= 0) this.prefetchWaiting.splice(index, 1);
+        reject(abortError());
+      };
+      waiting.start = () => {
+        signal.removeEventListener("abort", abortWaiting);
+        if (signal.aborted) return reject(abortError());
+        this.prefetchActive++;
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          signal.removeEventListener("abort", release);
+          this.prefetchActive--;
+          this.drainPrefetchSlots();
+        };
+        signal.addEventListener("abort", release, { once: true });
+        resolve(release);
+      };
+      this.prefetchWaiting.push(waiting);
+      signal.addEventListener("abort", abortWaiting, { once: true });
+      queueMicrotask(() => this.drainPrefetchSlots());
+    });
   }
 
-  clearPrefetchGroup(group) {
+  clearPrefetchGroup(group, page) {
     for (const candidate of group)
-      this.prefetchQueued.delete(this.glossKey(candidate));
+      if (this.prefetchQueued.get(this.glossKey(candidate)) === page)
+        this.prefetchQueued.delete(this.glossKey(candidate));
   }
 
   async runPrefetch(group, page) {
-    await this.acquirePrefetchSlot();
+    const signal = this.pageSignal(page);
+    let release;
     try {
+      release = await this.acquirePrefetchSlot(signal, page);
       if (this.disposed || this.prefetchStopped) {
-        this.clearPrefetchGroup(group);
         return;
       }
       // A detached or re-rendered page must not keep prefetching.
       if (this.pages.get(page.pageNumber) !== page) {
-        this.clearPrefetchGroup(group);
         return;
       }
-      await this.prefetchGroup(group);
+      await this.prefetchGroup(group, page);
+    } catch (error) {
+      if (error.name !== "AbortError") throw error;
     } finally {
-      this.releasePrefetchSlot();
+      release?.();
+      this.clearPrefetchGroup(group, page);
     }
   }
 
@@ -233,23 +409,23 @@ export class WordCompanion {
     const page =
       typeof target === "object" ? target : this.pages.get(Number(target));
     if (!page || this.disposed || this.prefetchStopped) return;
-    if (
-      !this.requestGlossBatch ||
-      !this.aiEnabled() ||
-      !this.isPageVisible(page)
-    )
+    if (this.pageSignal(page).aborted) return;
+    if (!this.requestGlossBatch || !this.aiEnabled() || !this.isPageNear(page))
       return;
     if (Date.now() < this.prefetchPausedUntil) return;
-    const settings = this.getSettings();
-    const limit =
-      settings.provider === "codex" ? CODEX_PREFETCH_LIMIT : PREFETCH_LIMIT;
-    const groups = new Map();
-    let count = 0;
-    for (const hit of page.hits || []) {
-      if (count >= limit) break;
-      if (!hit.prefetch) continue;
+    const groups = [];
+    let group = [];
+    // The page cap applies before cache filtering, so repeated scroll events
+    // cannot grow this into unrestricted whole-document translation.
+    const targets = this.prioritizedHits(page)
+      .filter(
+        (hit) =>
+          hit.prefetch &&
+          this.vocabulary[hit.candidate.lemma]?.state !== "known",
+      )
+      .slice(0, PREFETCH_LIMIT);
+    for (const hit of targets) {
       const candidate = hit.candidate;
-      if (this.vocabulary[candidate.lemma]?.state === "known") continue;
       const key = this.glossKey(candidate);
       if (
         this.cache.has(key) ||
@@ -258,25 +434,23 @@ export class WordCompanion {
         !candidate.sentence
       )
         continue;
-      let group = groups.get(candidate.sentence);
-      if (!group) {
-        group = [];
-        groups.set(candidate.sentence, group);
-      }
-      if (group.length >= PREFETCH_BATCH) continue;
       group.push(candidate);
-      this.prefetchQueued.add(key);
-      count++;
+      this.prefetchQueued.set(key, page);
+      if (group.length === PREFETCH_BATCH) {
+        groups.push(group);
+        group = [];
+      }
     }
+    if (group.length) groups.push(group);
     const jobs = [];
-    for (const group of groups.values())
-      jobs.push(this.runPrefetch(group, page));
-    // Match ReaderC: warm all sentence groups in parallel (bounded here) so a
-    // later sentence is not stuck behind a long queue.
+    for (const group of groups) jobs.push(this.runPrefetch(group, page));
+    // Adjacent targets share a request while retaining their individual sentence
+    // context. Global priority and concurrency leave room for visible text.
     return Promise.allSettled(jobs);
   }
 
-  async prefetchGroup(candidates) {
+  async prefetchGroup(candidates, page) {
+    const signal = this.pageSignal(page);
     const keys = candidates.map((candidate) => this.glossKey(candidate));
     try {
       if (this.disposed || this.prefetchStopped) return;
@@ -292,11 +466,15 @@ export class WordCompanion {
       const batch = (async () => {
         let raw;
         try {
-          raw = await this.requestGlossBatch(fresh);
-        } catch {
-          this.notePrefetchFailure();
+          raw = await withAbort(
+            () => this.requestGlossBatch(fresh, { signal }),
+            signal,
+          );
+        } catch (error) {
+          if (error.name !== "AbortError") this.notePrefetchFailure();
           return new Map();
         }
+        if (signal.aborted) return new Map();
         try {
           const reply =
             typeof raw === "string"
@@ -321,15 +499,21 @@ export class WordCompanion {
       for (const { candidate, key } of entries) {
         const result = batch.then((results) => results.get(candidate) || null);
         this.pending.set(key, result);
+        this.pendingOwners.set(key, page);
         result
           .finally(() => {
-            if (this.pending.get(key) === result) this.pending.delete(key);
+            if (this.pending.get(key) === result) {
+              this.pending.delete(key);
+              this.pendingOwners.delete(key);
+            }
           })
           .catch(() => {});
       }
       await batch;
     } finally {
-      for (const key of keys) this.prefetchQueued.delete(key);
+      for (const key of keys)
+        if (this.prefetchQueued.get(key) === page)
+          this.prefetchQueued.delete(key);
     }
   }
 
@@ -345,9 +529,8 @@ export class WordCompanion {
     for (const page of this.pages.values()) {
       clearTimeout(page.prefetchScheduled);
       page.prefetchScheduled = null;
+      this.cancelPageRequests(page);
     }
-    const waiting = this.prefetchWaiting.splice(0);
-    for (const resolve of waiting) resolve();
   }
 
   async setWordStatus(word, status) {
@@ -522,7 +705,11 @@ export class WordCompanion {
       this.vocabulary[hit.candidate.lemma]?.state === "known"
     )
       return;
-    const delay = Math.max(100, Number(this.getSettings().hoverDelay) || 120);
+    if (this.cache.has(this.glossKey(hit.candidate))) {
+      this.showGloss(hit);
+      return;
+    }
+    const delay = Math.max(0, Number(this.getSettings().hoverDelay) || 60);
     this.timer = setTimeout(() => this.showGloss(hit), delay);
   }
 
@@ -573,6 +760,7 @@ export class WordCompanion {
   async showGloss(hit) {
     if (this.disposed || this.hover !== hit || hit.glossable === false) return;
     const sequence = ++this.sequence;
+    const signal = this.pageSignal(hit.page);
     const key = this.glossKey(hit.candidate);
     let result = this.cache.get(key);
     if (!result && this.aiEnabled()) this.renderGlossCard(hit, "释义加载中…");
@@ -582,23 +770,30 @@ export class WordCompanion {
       if (!result && this.pending.has(key)) {
         const pending = this.pending.get(key);
         const raw = await pending;
+        if (signal.aborted) return;
         result = this.normalizeGloss(raw);
         if (result) this.rememberGloss(key, result);
         else if (this.pending.get(key) === pending) this.pending.delete(key);
       }
       if (!result && this.requestGloss) {
         if (!this.pending.has(key)) {
-          const request = Promise.resolve().then(() =>
-            this.requestGloss(hit.candidate),
+          const request = withAbort(
+            () => this.requestGloss(hit.candidate, { signal }),
+            signal,
           );
           this.pending.set(key, request);
+          this.pendingOwners.set(key, hit.page);
           request
             .finally(() => {
-              if (this.pending.get(key) === request) this.pending.delete(key);
+              if (this.pending.get(key) === request) {
+                this.pending.delete(key);
+                this.pendingOwners.delete(key);
+              }
             })
             .catch(() => {});
         }
         const raw = await this.pending.get(key);
+        if (signal.aborted) return;
         result = this.normalizeGloss(raw);
         if (result) this.rememberGloss(key, result);
       }
@@ -616,7 +811,7 @@ export class WordCompanion {
         gloss: message,
       });
     } catch (error) {
-      if (this.hover === hit && !this.disposed) {
+      if (!signal.aborted && this.hover === hit && !this.disposed) {
         this.renderGlossCard(hit, "释义暂不可用");
         this.onChange({
           type: "error",
@@ -639,6 +834,7 @@ export class WordCompanion {
       typeof pageNumber === "object" ? pageNumber.pageNumber : pageNumber,
     );
     if (!page) return;
+    this.cancelPageRequests(page);
     if (this.hover?.page === page) this.closeGloss();
     clearTimeout(page.prefetchScheduled);
     page.prefetchScheduled = null;
@@ -654,7 +850,9 @@ export class WordCompanion {
     for (const pageNumber of [...this.pages.keys()])
       this.detachPage(pageNumber);
     this.prefetchQueued.clear();
-    this.cache.clear();
+    if (this.cacheRevision !== this.cacheSavedRevision)
+      this.flushGlossCache().catch(() => {});
+    else this.cache.clear();
   }
 }
 

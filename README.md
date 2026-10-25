@@ -1,12 +1,12 @@
 # ReaderD
 
-配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.0 开发预览版**。
+配合 [ReaderC](https://github.com/HopeLeeee/readerc) 使用的 Windows 纯净文献阅读器。当前为 **0.2.2 开发预览版**。
 
 ## 启动
 
-普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.0.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
+普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.2.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
 
-开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.0/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
+开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.2/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
 
 在 Zotero 的 PDF 打开程序中选择上述新版 `ReaderD.exe`。支持通过命令行传入 PDF 路径，启动后直接打开对应文件（包含中文、空格的路径也支持）。ReaderD 已运行时，会在现有窗口打开新文件并先保存当前批注，不会另外停留在首页。升级后需要在 Zotero 重新选择新版 EXE 路径。
 
@@ -98,9 +98,11 @@ AI 配置使用服务基础地址（如 `https://服务/v1`）或完整 `/chat/c
 
 AI 连接方式也可以选择本地 Codex。留空程序路径时会自动查找 Codex Desktop 安装的最新 CLI（包括 `bin` 下带版本号的子目录），也可以手动填写 `codex.exe` 的绝对路径。调用使用 Codex 已有登录状态，仍需联网并消耗账户额度，不会读取当前聊天。程序以只读沙箱、临时会话、忽略用户配置和规则的方式启动 Codex，测试连接会实际发送一次最小请求，因此断网或额度耗尽时会提示失败而不是假装成功。
 
-AI 章节识别发送章节候选文本与页面位置，悬停词释发送目标词及其所在句；不会发送 PDF 文件。打开或滚动到页面后，程序会在约 60 毫秒后按句并行预取当前可见页的候选词释义（最多 6 个请求同时进行），悬停时优先读取缓存，未命中才单次请求。API 模式每页最多预取 60 个词，Codex 模式限制为 12 个；连续失败会暂停预取 30 秒，避免反复请求。
+AI 章节识别发送章节候选文本与页面位置，悬停词释发送目标词及其所在句；不会发送 PDF 文件。打开或滚动到页面后，程序会在约 60 毫秒后提前预取可见正文与附近一屏的候选词释义（最多 6 个请求同时进行，邻页最多占用两个名额），悬停时优先读取缓存，未命中才单次请求。API 与 Codex 模式每页最多预取 100 个候选词，每 12 个词合并一个请求，各词保留自己的句子、目标位置与编号；连续失败会暂停预取 30 秒，避免反复请求。切换文献、页面卸载或退出时，会取消旧页的 HTTP 请求及 Codex 子进程，立即释放预取名额；旧结果不再写入缓存。
 
-词释请求直接复用 ReaderC 的 `requestBody` / `batchRequestBody`：按句合并多个词，关闭推理（`reasoning_effort: none`、`enable_thinking: false`），单次限制 64 tokens，批量按词数限制输出长度。这样推理模型不会在返回释义前额外思考几十个 token。远程服务需要 HTTPS，本地服务允许 HTTP。PDF 渲染、批注、规则目录、引用与基础推荐不需要联网。
+缓存命中时取消固定悬停等待，立即显示；只保存校验合格的上下文词释，最多 5000 条，存于用户数据目录的 `gloss-cache.json`，重新打开仍可复用。缓存按服务、模型、原句与目标位置隔离，不把同一个词在不同语境下的释义混用。首次阅读尚未预热的内容仍需等待模型，尤其 Codex 冷调用可能需要数秒；不会用未经上下文确认的词典释义冒充模型结果。
+
+词释请求复用 ReaderC 的 `requestBody` / `batchRequestBody`：按句合并多个词，关闭推理（`reasoning_effort: none`、`enable_thinking: false`），单次限制 64 tokens，批量按词数限制输出长度，跨句时为每个目标单独提供上下文。服务明确拒绝可选参数时，仅移除该参数后重试，并按地址和模型缓存兼容结果；鉴权、额度和普通服务错误不会触发兼容重试。连接测试使用实际词释请求，避免仅通用请求能成功而词释失败。返回结果须为有效、简短的中文释义，截断或格式错误不缓存，下次悬停可以重试。远程服务需要 HTTPS，本地服务允许 HTTP。PDF 渲染、批注、规则目录、引用与基础推荐不需要联网。
 
 只有带浅绿色虚线的候选词会触发悬停释义。没有虚线的普通词（例如常见的 `connects`）悬停不会发请求，也不会出现“释义加载中”；仍可用上侧键或下侧键将其标记为熟词/生词，标记后才进入候选词流程。
 
@@ -114,7 +116,12 @@ npm run smoke:navigation
 npm run smoke:external-open
 npm run smoke:onboarding
 npm run smoke:codex
+npm run smoke:regression
+npm run smoke:hover-speed
+npm run smoke:codex-cancel
 npm run pack
+npm run dist
+npm run smoke:portable
 ```
 
 逻辑与文件测试涵盖引用列表与双栏提取、兴趣排序、Markdown 手动内容保护、鼠标侧键、真实词形、批注重复保存和旋转裁剪坐标。桌面测试使用隔离的用户目录和生成的三页论文 PDF，验证无按钮界面、选区、高亮、中文批注写入、引用全量悬浮、侧键状态、三条推荐、偏好保存、重新打开与退出。

@@ -183,15 +183,27 @@ var ReaderCCore = (() => {
     let data;
     try { data = JSON.parse(cleaned); } catch { throw new Error("批量翻译结果不是约定的 JSON 格式。"); }
     if (!Array.isArray(data)) throw new Error("批量翻译结果应为 JSON 数组。");
-    const byWord = new Map();
+    const byId = new Map(), byWord = new Map(), duplicateIds = new Set(), duplicateWords = new Set();
     for (const item of data) {
       if (!item || typeof item.word !== "string") continue;
       const gloss = typeof item.gloss === "string" ? item.gloss.trim() : "";
-      byWord.set(normalize(item.word), saneGloss(gloss) ? gloss : null);
+      if (!saneGloss(gloss)) continue;
+      const word = normalize(item.word);
+      if (Number.isInteger(item.id) && item.id >= 0 && item.id < candidates.length) {
+        if (byId.has(item.id)) duplicateIds.add(item.id);
+        byId.set(item.id, {word, gloss});
+      } else if (item.id == null) {
+        if (byWord.has(word)) duplicateWords.add(word);
+        byWord.set(word, gloss);
+      }
     }
+    const counts = new Map();
+    for (const candidate of candidates) { const word = normalize(candidate.word); counts.set(word, (counts.get(word) || 0) + 1); }
     const result = new Map();
-    for (const candidate of candidates) {
-      const gloss = byWord.get(normalize(candidate.word));
+    for (const [id, candidate] of candidates.entries()) {
+      const word = normalize(candidate.word), indexed = byId.get(id);
+      const gloss = indexed && !duplicateIds.has(id) && indexed.word === word ? indexed.gloss
+        : !indexed && counts.get(word) === 1 && !duplicateWords.has(word) ? byWord.get(word) : null;
       if (gloss) result.set(candidate, gloss);
     }
     return result;

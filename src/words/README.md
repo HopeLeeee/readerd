@@ -1,8 +1,8 @@
 # readerc integration
 
-`readerc-core.js` is the unmodified portable logic from HopeLeeee/readerc
+`readerc-core.js` is adapted from the portable logic in HopeLeeee/readerc
 `addon/src/core.js` at commit `b3eff01dc649d2839f69a7f356d1e655e1956b46`,
-with its CommonJS footer replaced by ES module exports. MIT attribution is in
+with its CommonJS footer replaced by ES module exports. The batch parser now preserves explicit item IDs to keep repeated words in different contexts separate; model request bodies also include reasoning controls with host-side compatibility handling. MIT attribution is in
 `LICENSE.readerc.txt`. Source: https://github.com/HopeLeeee/readerc.
 
 `companion.js` adapts the non-destructive range and overlay approach of readerc's
@@ -58,3 +58,7 @@ so markers have fresh geometry. `handlePointer(event)` and
 `familiar`/`unfamiliar`. No marking happens without a word at the pointer.
 Selection/copy stays with PDF.js: text nodes are untouched and markers ignore
 pointer input. Side-button navigation is suppressed within attached pages.
+
+## Fast contextual hover (0.2.2)
+
+Ready context-cache entries render synchronously on pointer hover. The host provides `loadGlossCache()` and `saveGlossCache(entries)` for at most 5000 validated entries, and awaits `flushGlossCache()` on exit. Each entry retains service/model, sentence and target-position identity. Prefetch starts after 60ms for visible or nearby pages, takes up to 100 candidates per page, and combines up to 12 individually contextualized words per request. Neighbouring pages reserve concurrency for visible text. Cold model responses remain asynchronous; cached UI updates do not imply zero cold inference latency.

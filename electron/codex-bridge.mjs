@@ -126,73 +126,112 @@ export function createCodexBridge({
     );
   }
 
-  async function run(executable, args, input, timeoutMs) {
+  function abortError() {
+    const error = new Error("Codex 请求已取消。");
+    error.name = "AbortError";
+    return error;
+  }
+
+  async function run(executable, args, input, timeoutMs, signal) {
+    if (signal?.aborted) throw abortError();
     const cwd = await fs.mkdtemp(path.join(tempRoot, "readerd-codex-"));
-    try {
-      return await new Promise((resolve, reject) => {
-        const child = spawnProcess(executable, args, {
+    const cleanup = () =>
+      fs
+        .rm(cwd, { recursive: true, force: true, maxRetries: 3 })
+        .catch(() => {});
+    if (signal?.aborted) {
+      await cleanup();
+      throw abortError();
+    }
+    return new Promise((resolve, reject) => {
+      let child;
+      try {
+        child = spawnProcess(executable, args, {
           cwd,
           windowsHide: true,
           shell: false,
           stdio: ["pipe", "pipe", "pipe"],
           env: environment,
         });
-        let stdout = "",
-          stderr = "",
-          bytes = 0,
-          finished = false;
-        const finish = (error, result) => {
+      } catch (error) {
+        cleanup().then(() =>
+          reject(new Error(`无法启动 Codex：${error.message}`)),
+        );
+        return;
+      }
+      let stdout = "",
+        stderr = "",
+        bytes = 0,
+        finished = false;
+      const dataListeners = [];
+      const finish = (error, result, afterCleanup) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        for (const [stream, listener] of dataListeners)
+          stream.removeListener("data", listener);
+        const settle = () => (error ? reject(error) : resolve(result));
+        if (afterCleanup) afterCleanup.then(settle);
+        else settle();
+      };
+      const stop = (error) => {
+        if (finished) return;
+        // Reject promptly, but retain the close listener so the working
+        // directory is removed only after the process has stopped using it.
+        finish(error);
+        child.kill();
+      };
+      const onAbort = () => stop(abortError());
+      const timer = setTimeout(
+        () => stop(new Error("Codex 请求超时，请检查网络连接后重试。")),
+        timeoutMs,
+      );
+      for (const [stream, isOutput] of [
+        [child.stdout, true],
+        [child.stderr, false],
+      ]) {
+        stream.setEncoding("utf8");
+        const listener = (chunk) => {
           if (finished) return;
-          finished = true;
-          clearTimeout(timer);
-          error ? reject(error) : resolve(result);
+          bytes += Buffer.byteLength(chunk);
+          if (bytes > OUTPUT_LIMIT)
+            return stop(new Error("Codex 输出超出限制。"));
+          if (isOutput) stdout += chunk.toString();
+          else stderr += chunk.toString();
         };
-        const stop = (message) => {
-          child.kill();
-          finish(new Error(message));
-        };
-        const timer = setTimeout(
-          () => stop("Codex 请求超时，请检查网络连接后重试。"),
-          timeoutMs,
-        );
-        for (const [stream, isOutput] of [
-          [child.stdout, true],
-          [child.stderr, false],
-        ]) {
-          stream.setEncoding("utf8");
-          stream.on("data", (chunk) => {
-            bytes += Buffer.byteLength(chunk);
-            if (bytes > OUTPUT_LIMIT) return stop("Codex 输出超出限制。");
-            if (isOutput) stdout += chunk.toString();
-            else stderr += chunk.toString();
-          });
-        }
-        child.on("error", (error) =>
-          finish(new Error(`无法启动 Codex：${error.message}`)),
-        );
-        child.on("close", (code) => {
-          if (code !== 0) {
-            let message = stderr.trim().slice(-1200);
-            try {
-              parseCodexOutput(stdout);
-            } catch (error) {
-              if (!message) message = error.message;
-            }
-            finish(
-              new Error(
-                `Codex 运行失败${code == null ? "" : ` (${code})`}：${message || "请检查登录状态。"}`,
-              ),
-            );
-          } else finish(null, { stdout, stderr });
-        });
-        child.stdin.on("error", () => {});
-        child.stdin.end(input);
+        dataListeners.push([stream, listener]);
+        stream.on("data", listener);
+      }
+      const onError = (error) =>
+        finish(new Error(`无法启动 Codex：${error.message}`));
+      child.on("error", onError);
+      child.once("close", (code) => {
+        child.removeListener("error", onError);
+        const cleaned = cleanup();
+        if (finished) return;
+        if (code !== 0) {
+          let message = stderr.trim().slice(-1200);
+          try {
+            parseCodexOutput(stdout);
+          } catch (error) {
+            if (!message) message = error.message;
+          }
+          finish(
+            new Error(
+              `Codex 运行失败${code == null ? "" : ` (${code})`}：${message || "请检查登录状态。"}`,
+            ),
+            undefined,
+            cleaned,
+          );
+        } else finish(null, { stdout, stderr }, cleaned);
       });
-    } finally {
-      await fs
-        .rm(cwd, { recursive: true, force: true, maxRetries: 3 })
-        .catch(() => {});
-    }
+      child.stdin.on("error", () => {});
+      signal?.addEventListener("abort", onAbort, { once: true });
+      // Covers cancellation between the initial check and listener setup.
+      if (signal?.aborted) onAbort();
+      if (!finished) child.stdin.end(input);
+    });
   }
 
   async function probeCodex({ executable } = {}) {
@@ -213,7 +252,9 @@ export function createCodexBridge({
     executable,
     model,
     timeoutMs = 120000,
+    signal,
   } = {}) {
+    if (signal?.aborted) throw abortError();
     if (
       typeof prompt !== "string" ||
       !prompt.trim() ||
@@ -224,7 +265,7 @@ export function createCodexBridge({
       throw new Error("Codex 超时设置无效。");
     const args = codexArguments(model);
     const resolved = await locate(executable);
-    const { stdout } = await run(resolved, args, prompt, timeoutMs);
+    const { stdout } = await run(resolved, args, prompt, timeoutMs, signal);
     return parseCodexOutput(stdout);
   }
   return { probeCodex, requestCodex };

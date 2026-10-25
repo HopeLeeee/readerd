@@ -16,3 +16,4 @@ reading-profile.md
 .env
 .env.*
 !.env.example
+gloss-cache.json

@@ -33,7 +33,7 @@ const server = http.createServer(async (request, response) => {
       JSON.stringify(
         rejectConnection
           ? { error: { message: "Deliberate first-launch connection failure" } }
-          : { choices: [{ message: { content: '{"ok":true}' } }] },
+          : { choices: [{ message: { content: '{"gloss":"阅读"}' } }] },
       ),
     );
   } catch (error) {

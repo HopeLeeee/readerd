@@ -21,10 +21,14 @@ contextBridge.exposeInMainWorld(
     getProfile: () => ipcRenderer.invoke("readerd:get-profile"),
     saveProfile: (markdown) =>
       ipcRenderer.invoke("readerd:save-profile", markdown),
+    getGlossCache: () => ipcRenderer.invoke("readerd:get-gloss-cache"),
+    saveGlossCache: (entries) =>
+      ipcRenderer.invoke("readerd:save-gloss-cache", entries),
     getSettings: () => ipcRenderer.invoke("readerd:get-settings"),
     saveSettings: (settings) =>
       ipcRenderer.invoke("readerd:save-settings", settings),
     testAI: (settings) => ipcRenderer.invoke("readerd:test-ai", settings),
+    cancelAI: (requestId) => ipcRenderer.invoke("readerd:cancel-ai", requestId),
     requestAI: (request) => ipcRenderer.invoke("readerd:request-ai", request),
     windowAction: (action) =>
       ipcRenderer.invoke("readerd:window-action", action),

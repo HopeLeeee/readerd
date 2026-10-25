@@ -117,6 +117,19 @@ function shapeProfile(result) {
     typeof result === "string" ? result : result?.markdown || "",
   );
 }
+async function requestAI(kind, payload, signal) {
+  signal?.throwIfAborted();
+  const requestId = crypto.randomUUID();
+  const cancel = () => {
+    api.cancelAI(requestId).catch(() => {});
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    return await api.requestAI({ kind, payload, requestId });
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+  }
+}
 async function init() {
   if (!api) {
     toast("请通过 npm start 启动桌面应用");
@@ -134,19 +147,21 @@ async function init() {
     toast("词库加载失败，手动标词仍可使用：" + e.message);
   }
   companion = new WordCompanion({
+    loadGlossCache: () => api.getGlossCache(),
+    saveGlossCache: (entries) => api.saveGlossCache(entries),
     getSettings: () => ({
       ...state.settings,
       lexicon,
       familiarButton: Number(state.settings.familiarButton ?? 4),
       unfamiliarButton: Number(state.settings.unfamiliarButton ?? 3),
     }),
-    requestGloss: async (candidate) =>
-      aiEnabled() ? api.requestAI({ kind: "gloss", payload: candidate }) : null,
-    requestGlossBatch: async (candidates) => {
+    requestGloss: async (candidate, { signal } = {}) =>
+      aiEnabled() ? requestAI("gloss", candidate, signal) : null,
+    requestGlossBatch: async (candidates, { signal } = {}) => {
       if (!aiEnabled() || !candidates.length) return null;
-      return api.requestAI({
-        kind: "glossBatch",
-        payload: {
+      return requestAI(
+        "glossBatch",
+        {
           candidates: candidates.map((candidate) => ({
             word: candidate.word.replace(/-\s*\n\s*/g, ""),
             lemma: candidate.lemma,
@@ -155,7 +170,8 @@ async function init() {
             targetEnd: candidate.targetEnd,
           })),
         },
-      });
+        signal,
+      );
     },
     loadState: async () => state.settings.vocabulary || {},
     saveState: async (vocabulary) => {
@@ -211,6 +227,7 @@ async function closeApplication() {
   await zoomQueue.catch(() => {});
   await flush();
   await companion?.queue;
+  await companion?.flushGlossCache().catch(() => {});
   await api.windowAction("close");
 }
 async function openDocument(file) {
@@ -1259,7 +1276,7 @@ function prefetchVisiblePages() {
       if (rect.bottom > reader.top && rect.top < reader.bottom)
         companion?.prefetchPage(view.number).catch(() => {});
     }
-  }, 300);
+  }, 80);
 }
 $("reader").addEventListener(
   "scroll",

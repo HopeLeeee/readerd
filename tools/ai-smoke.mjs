@@ -62,7 +62,10 @@ const server = http.createServer(async (request, response) => {
           },
         ],
       };
-    } else if (system.includes("为每个目标词")) {
+    } else if (
+      system.includes("为每个目标词") ||
+      system.includes("Task: glossBatch")
+    ) {
       calls.glossBatch++;
       assert.equal(body.reasoning_effort, "none");
       assert.equal(body.enable_thinking, false);
@@ -71,7 +74,13 @@ const server = http.createServer(async (request, response) => {
       const payload = JSON.parse(
         body.messages.find((message) => message.role === "user").content,
       );
-      result = payload.words.map((word) => ({ word, gloss: "代谢" }));
+      result = payload.items
+        ? payload.items.map((item) => ({
+            id: item.id,
+            word: item.word,
+            gloss: "代谢",
+          }))
+        : payload.words.map((word) => ({ word, gloss: "代谢" }));
     } else if (system.includes("判断目标词")) {
       calls.gloss++;
       assert.equal(body.reasoning_effort, "none");

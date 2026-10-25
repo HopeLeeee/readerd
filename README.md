@@ -4,7 +4,9 @@
 
 ## 启动
 
-从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 Windows 便携版，或在源码目录执行 `npm install` 与 `npm run pack` 后运行 `release/0.2.0/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
+普通用户无需安装 Node.js，也不需要 `win-unpacked` 文件夹：从 [GitHub Releases](https://github.com/HopeLeeee/readerd/releases/latest) 下载 `ReaderD-0.2.0.exe`，双击即可运行。仓库只保存源码和测试，不提交 `release/` 构建产物；便携版已经把完整的 `win-unpacked` 内容封装进单个 EXE。
+
+开发者可在源码目录执行 `npm install`、`npm run pack`，然后运行 `release/0.2.0/win-unpacked/ReaderD.exe`（整个 `win-unpacked` 文件夹需一起保留）。也可双击根目录的 `启动ReaderD.cmd`。旧版程序仍在运行时，先保存并关闭旧窗口，再打开新版。
 
 在 Zotero 的 PDF 打开程序中选择上述新版 `ReaderD.exe`。支持通过命令行传入 PDF 路径，启动后直接打开对应文件（包含中文、空格的路径也支持）。ReaderD 已运行时，会在现有窗口打开新文件并先保存当前批注，不会另外停留在首页。升级后需要在 Zotero 重新选择新版 EXE 路径。
 
